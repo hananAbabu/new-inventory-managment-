@@ -23,10 +23,12 @@ const TX_FILTERS: (TxType | 'all')[] = [
 ];
 
 export default function InventoryPage() {
-  const { db, money } = useStore();
+  const { db, me, money } = useStore();
   const [tab, setTab] = useState<Tab>('levels');
   const [movement, setMovement] = useState<{ productId?: number; type: MovementType } | null>(null);
 
+  // Stock valuation is owner information; the storekeeper works in quantities.
+  const showValues = me!.role === 'admin';
   const costV = inventoryValue(db);
   const retV = retailValue(db);
 
@@ -37,9 +39,14 @@ export default function InventoryPage() {
           stats={[
             { label: 'SKUs', value: db.products.length },
             { label: 'Out of stock', value: db.products.filter((p) => p.qty <= 0).length },
-            { label: 'Value at cost', value: money(costV) },
-            { label: 'Value at retail', value: money(retV) },
-            { label: 'Potential margin', value: money(retV - costV), accent: true },
+            { label: 'Low stock', value: db.products.filter((p) => p.qty <= p.minStock).length },
+            ...(showValues
+              ? [
+                  { label: 'Value at cost', value: money(costV) },
+                  { label: 'Value at retail', value: money(retV) },
+                  { label: 'Potential margin', value: money(retV - costV), accent: true },
+                ]
+              : []),
           ]}
         >
           <button
@@ -80,7 +87,8 @@ export default function InventoryPage() {
 }
 
 function StockLevels({ onMove }: { onMove: (productId: number, type: MovementType) => void }) {
-  const { db, money } = useStore();
+  const { db, me, money } = useStore();
+  const showValues = me!.role === 'admin';
   const list = useMemo(
     () => [...db.products].sort((a, b) => a.name.localeCompare(b.name)),
     [db.products],
@@ -98,7 +106,7 @@ function StockLevels({ onMove }: { onMove: (productId: number, type: MovementTyp
               <th className="num">On hand</th>
               <th className="num">Min</th>
               <th>Status</th>
-              <th className="num">Cost value</th>
+              {showValues ? <th className="num">Cost value</th> : null}
               <th />
             </tr>
           </thead>
@@ -118,7 +126,7 @@ function StockLevels({ onMove }: { onMove: (productId: number, type: MovementTyp
                   <td>
                     <Badge tone={st.tone}>{st.label}</Badge>
                   </td>
-                  <td className="num">{money(p.qty * p.costPrice)}</td>
+                  {showValues ? <td className="num">{money(p.qty * p.costPrice)}</td> : null}
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button
                       className="btn btn-soft"

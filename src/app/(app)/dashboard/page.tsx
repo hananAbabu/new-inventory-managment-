@@ -263,7 +263,7 @@ function AdminDashboard() {
 /* ---------------- storekeeper ---------------- */
 
 function KeeperDashboard() {
-  const { db, money } = useStore();
+  const { db } = useStore();
   const low = lowStock(db);
   // Quantities span pieces, kilograms and litres, so this counts receipts, not a mixed-unit total.
   const recv30 = db.invTx
@@ -271,11 +271,12 @@ function KeeperDashboard() {
     .filter((t) => t.date >= Date.now() - 30 * DAY).length;
   const moves = [...db.invTx].sort((a, b) => b.date - a.date).slice(0, 8);
 
+  // Counted in SKUs rather than valued: stock valuation is owner information,
+  // and quantities across pieces, kilograms and litres cannot be summed anyway.
   const catMap: Record<number, number> = {};
   db.products.forEach((p) => {
-    catMap[p.categoryId] = (catMap[p.categoryId] || 0) + p.qty * p.costPrice;
+    catMap[p.categoryId] = (catMap[p.categoryId] || 0) + 1;
   });
-  const currency = db.settings.currency;
 
   return (
     <>
@@ -294,7 +295,13 @@ function KeeperDashboard() {
           tone="blue"
           sub="SKUs at zero"
         />
-        <Kpi label="Inventory value" value={money(inventoryValue(db))} icon="chart" tone="violet" sub="at cost price" />
+        <Kpi
+          label="Pending orders"
+          value={db.purchases.filter((p) => p.status === 'ordered').length}
+          icon="inbox"
+          tone="violet"
+          sub="awaiting delivery"
+        />
         <Kpi label="Stock receipts (30d)" value={recv30} icon="truck" tone="green" />
         <Kpi
           label="Low-stock products"
@@ -355,7 +362,7 @@ function KeeperDashboard() {
 
         <div className="card">
           <div className="card-h">
-            <h3>Stock value by category</h3>
+            <h3>Products by category</h3>
           </div>
           <div className="card-b">
             <Chart
@@ -365,8 +372,8 @@ function KeeperDashboard() {
                   labels: Object.keys(catMap).map((id) => catName(db, Number(id))),
                   datasets: [
                     {
-                      label: 'Value',
-                      data: Object.values(catMap).map((v) => +v.toFixed(2)),
+                      label: 'SKUs',
+                      data: Object.values(catMap),
                       backgroundColor: '#2f6fd0',
                       borderRadius: 6,
                       maxBarThickness: 30,
@@ -377,7 +384,7 @@ function KeeperDashboard() {
                   indexAxis: 'y',
                   maintainAspectRatio: false,
                   plugins: { legend: { display: false } },
-                  scales: { x: { ticks: { callback: (v) => currency + v } } },
+                  scales: { x: { ticks: { precision: 0 } } },
                 },
               }}
             />

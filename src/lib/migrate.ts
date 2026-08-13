@@ -36,9 +36,11 @@ interface LegacyProduct extends Omit<Product, 'unit'> {
 interface LegacySaleItem extends Omit<SaleItem, 'unit'> {
   unit?: Unit;
 }
-interface LegacySale extends Omit<Sale, 'payMethod' | 'bank' | 'items'> {
+interface LegacySale extends Omit<Sale, 'payMethod' | 'bank' | 'items' | 'txnRef' | 'txnPhoto'> {
   payMethod: LegacyPayMethod;
   bank?: Bank | null;
+  txnRef?: string | null;
+  txnPhoto?: string | null;
   items: LegacySaleItem[];
 }
 interface LegacyPurchaseItem extends Omit<PurchaseItem, 'unit'> {
@@ -95,6 +97,8 @@ export function migrate(db: LegacyDb): Db {
       ...s,
       payMethod: payMethod(s.payMethod),
       bank: s.bank ?? null,
+      txnRef: s.txnRef ?? null,
+      txnPhoto: s.txnPhoto ?? null,
       items: s.items.map((i) => ({ ...i, unit: unitOf(i.productId, i.unit) })),
     })),
     purchases: db.purchases.map((p) => ({

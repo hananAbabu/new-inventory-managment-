@@ -78,6 +78,12 @@ export function ReceiptView({ sale }: { sale: Sale }) {
               <td style={{ textAlign: 'right' }}>{bankShort(sale.bank)}</td>
             </tr>
           ) : null}
+          {sale.txnRef ? (
+            <tr>
+              <td>Txn no.</td>
+              <td style={{ textAlign: 'right', wordBreak: 'break-all' }}>{sale.txnRef}</td>
+            </tr>
+          ) : null}
           <tr>
             <td>Change</td>
             <td style={{ textAlign: 'right' }}>{money(sale.change)}</td>
@@ -106,6 +112,24 @@ export function ReceiptModal({ sale, onClose }: { sale: Sale | null; onClose: ()
       <Modal open onClose={onClose} title={`Receipt ${sale.ref}`} size="sm">
         <ModalBody style={{ background: '#f2f6f3' }}>
           <ReceiptView sale={sale} />
+          {sale.txnPhoto ? (
+            <div className="slip-view" style={{ marginTop: '14px' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  letterSpacing: '.12em',
+                  textTransform: 'uppercase',
+                  color: 'var(--muted)',
+                  fontWeight: 800,
+                  marginBottom: '6px',
+                }}
+              >
+                Transfer slip
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={sale.txnPhoto} alt={`Transfer slip for ${sale.ref}`} />
+            </div>
+          ) : null}
         </ModalBody>
         <ModalFooter>
           <button className="btn btn-ghost" onClick={onClose}>

@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useToast } from './toast';
 import { migrate, type LegacyDb } from '@/lib/migrate';
 import { seed } from '@/lib/seed';
 import { money as fmtMoney } from '@/lib/selectors';
@@ -65,6 +66,7 @@ function loadSession(): Session | null {
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const toast = useToast();
   const [db, setDb] = useState<Db | null>(null);
   const [session, setSession] = useState<Session | null>(null);
 
@@ -74,9 +76,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setSession(loadSession());
   }, []);
 
-  const persist = useCallback((next: Db) => {
-    localStorage.setItem(LS_DB, JSON.stringify(next));
-  }, []);
+  // Slip photos can push the workspace past the ~5 MB localStorage ceiling. The
+  // write must not fail silently: the state would look saved and be gone on reload.
+  const persist = useCallback(
+    (next: Db) => {
+      try {
+        localStorage.setItem(LS_DB, JSON.stringify(next));
+      } catch {
+        toast(
+          'Browser storage is full — this change is not saved. Remove some transfer slip photos and try again.',
+          'error',
+        );
+      }
+    },
+    [toast],
+  );
 
   const persistSession = useCallback((next: Session | null) => {
     if (next) localStorage.setItem(LS_SES, JSON.stringify(next));

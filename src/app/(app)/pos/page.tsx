@@ -8,6 +8,7 @@ import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { EmptyState } from '@/components/ui';
 import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
+import { MAX_SLIP_BYTES, compressImage, dataUrlBytes, formatBytes } from '@/lib/image';
 import type { Bank, CartLine, PayMethod, Sale, SaleItem } from '@/lib/types';
 import { formatQty, formatQtyNumber, parseQty, qtyMin, roundQty, unitShort } from '@/lib/units';
 import { nextRef, uid } from '@/lib/utils';
@@ -126,7 +127,13 @@ export default function PosPage() {
     setDiscount(d);
   }
 
-  function completeSale(method: PayMethod, bank: Bank | null, paid: number) {
+  function completeSale(
+    method: PayMethod,
+    bank: Bank | null,
+    paid: number,
+    txnRef: string | null,
+    txnPhoto: string | null,
+  ) {
     if (!cart.length) return;
     for (const l of cart) {
       const p = db.products.find((x) => x.id === l.productId);
@@ -162,6 +169,8 @@ export default function PosPage() {
       total: totals.total,
       payMethod: method,
       bank,
+      txnRef,
+      txnPhoto,
       amountPaid: paid,
       change: Math.max(0, paid - totals.total),
       createdAt: now,
@@ -200,7 +209,7 @@ export default function PosPage() {
         'sale',
         `${sale.ref} · ${money(sale.total)} · ${items.length} lines · ${payMethodLabel(method)}${
           bank ? ' (' + bankShort(bank) + ')' : ''
-        }`,
+        }${txnRef ? ' · ref ' + txnRef : ''}${txnPhoto ? ' · slip attached' : ''}`,
       );
     });
 
@@ -444,13 +453,22 @@ function PaymentModal({
   itemCount: number;
   discountPct: number;
   onClose: () => void;
-  onComplete: (method: PayMethod, bank: Bank | null, paid: number) => void;
+  onComplete: (
+    method: PayMethod,
+    bank: Bank | null,
+    paid: number,
+    txnRef: string | null,
+    txnPhoto: string | null,
+  ) => void;
 }) {
   const { money } = useStore();
   const toast = useToast();
   const [method, setMethod] = useState<PayMethod>('cash');
   const [bank, setBank] = useState<Bank>('cbe');
   const [paidInput, setPaidInput] = useState('');
+  const [txnRef, setTxnRef] = useState('');
+  const [txnPhoto, setTxnPhoto] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const paid = method === 'cash' ? parseFloat(paidInput) : total;
   const change = isNaN(paid) ? 0 : Math.max(0, paid - total);
@@ -465,16 +483,50 @@ function PaymentModal({
     .filter((v, i, a) => a.indexOf(v) === i)
     .slice(0, 5);
 
+  async function onPickPhoto(file: File | undefined) {
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await compressImage(file);
+      const size = dataUrlBytes(dataUrl);
+      if (size > MAX_SLIP_BYTES) {
+        toast(
+          `That photo is still ${formatBytes(size)} after compression — use a smaller one.`,
+          'error',
+        );
+        return;
+      }
+      setTxnPhoto(dataUrl);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not read that photo', 'error');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   function submit() {
     if (method === 'cash' && (isNaN(paid) || paid < total)) {
       toast('Cash received is less than the total', 'error');
       return;
     }
-    if (needsBank(method) && !bank) {
-      toast('Select the bank that received the payment', 'error');
-      return;
+    const ref = txnRef.trim();
+    if (needsBank(method)) {
+      if (!bank) {
+        toast('Select the bank that received the payment', 'error');
+        return;
+      }
+      if (!ref && !txnPhoto) {
+        toast('Enter the transaction number or attach the slip photo', 'error');
+        return;
+      }
     }
-    onComplete(method, needsBank(method) ? bank : null, method === 'cash' ? paid : total);
+    onComplete(
+      method,
+      needsBank(method) ? bank : null,
+      method === 'cash' ? paid : total,
+      needsBank(method) ? ref || null : null,
+      needsBank(method) ? txnPhoto : null,
+    );
   }
 
   return (
@@ -526,21 +578,64 @@ function PaymentModal({
         </div>
 
         {needsBank(method) ? (
-          <div className="field">
-            <label htmlFor="pay-bank">Bank *</label>
-            <select
-              id="pay-bank"
-              className="select"
-              value={bank}
-              onChange={(e) => setBank(e.target.value as Bank)}
-            >
-              {BANKS.map((b) => (
-                <option key={b.value} value={b.value}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <>
+            <div className="field">
+              <label htmlFor="pay-bank">Bank *</label>
+              <select
+                id="pay-bank"
+                className="select"
+                value={bank}
+                onChange={(e) => setBank(e.target.value as Bank)}
+              >
+                {BANKS.map((b) => (
+                  <option key={b.value} value={b.value}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label htmlFor="pay-txn">Transaction number</label>
+              <input
+                id="pay-txn"
+                className="input"
+                placeholder="e.g. FT25081300ABCD"
+                value={txnRef}
+                onChange={(e) => setTxnRef(e.target.value)}
+              />
+              <span className="hint">
+                Enter the reference from the bank, or attach the slip below — one of the two is
+                required.
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="pay-slip">Transfer slip photo</label>
+              {txnPhoto ? (
+                <div className="slip-preview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={txnPhoto} alt="Attached transfer slip" />
+                  <div className="slip-actions">
+                    <span>{formatBytes(dataUrlBytes(txnPhoto))} attached</span>
+                    <button type="button" className="btn btn-ghost" onClick={() => setTxnPhoto(null)}>
+                      <Icon name="trash" /> Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <input
+                  id="pay-slip"
+                  className="input"
+                  type="file"
+                  accept="image/*"
+                  disabled={photoBusy}
+                  onChange={(e) => onPickPhoto(e.target.files?.[0])}
+                />
+              )}
+              {photoBusy ? <span className="hint">Compressing photo…</span> : null}
+            </div>
+          </>
         ) : null}
 
         {method === 'cash' ? (

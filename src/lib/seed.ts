@@ -235,6 +235,8 @@ export function seed(): Db {
         total,
         payMethod: method,
         bank,
+        txnRef: bank ? 'FT' + String(Math.floor(R() * 9_000_000) + 1_000_000) : null,
+        txnPhoto: null,
         amountPaid: paid,
         change: Math.max(0, paid - total),
         createdAt: ts,

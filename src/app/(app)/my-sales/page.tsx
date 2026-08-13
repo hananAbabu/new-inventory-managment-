@@ -60,7 +60,22 @@ export default function MySalesPage() {
                     <td>
                       <Badge tone="b-gray">{payMethodLabel(s.payMethod)}</Badge>
                     </td>
-                    <td>{s.bank ? <Badge tone="b-blue">{bankShort(s.bank)}</Badge> : '—'}</td>
+                    <td>
+                      {s.bank ? <Badge tone="b-blue">{bankShort(s.bank)}</Badge> : '—'}
+                      {s.txnRef ? (
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: 'var(--muted)',
+                            marginTop: '2px',
+                            maxWidth: '130px',
+                            overflowWrap: 'anywhere',
+                          }}
+                        >
+                          {s.txnRef}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="num">
                       <b>{money(s.total)}</b>
                     </td>

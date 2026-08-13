@@ -94,6 +94,10 @@ export interface Sale {
   payMethod: PayMethod;
   /** Which bank cleared the money — null for cash. */
   bank: Bank | null;
+  /** Bank transaction / reference number, for anything not paid in cash. */
+  txnRef: string | null;
+  /** Photographed transfer slip, stored as a compressed data URL. */
+  txnPhoto: string | null;
   amountPaid: number;
   change: number;
   createdAt: number;

@@ -75,6 +75,23 @@ Reports has a **Banks** tab that reconciles each account on its own: money
 received through it (sales), money paid out of it (received purchases), and the
 net, with cash totals shown separately so nothing is double-counted.
 
+A non-cash sale must also carry proof: a **transaction number**, a photographed
+**transfer slip**, or both — the register refuses to close the sale without at
+least one. The number prints on the receipt; the photo is shown on screen with
+it. Slips are downscaled to 1000 px and re-encoded as JPEG (`src/lib/image.ts`)
+because the whole workspace shares one ~5 MB localStorage budget, and anything
+still over 400 KB after that is rejected. If a write does exceed the quota the
+store says so rather than looking saved and vanishing on reload.
+
+### What the storekeeper cannot see
+
+Stock valuation is owner information. The storekeeper's dashboard, inventory
+page and inventory report show quantities, minimums and status but no cost
+value, retail value or margin, and the Product Performance report (revenue and
+profit per product) is admin-only. Per-product cost and selling price stay
+visible on the Products page, since the storekeeper maintains the catalogue and
+has to enter them.
+
 ### Units of measure
 
 Products carry a unit: **pcs**, **carton**, **kg** or **L**. Weight and volume

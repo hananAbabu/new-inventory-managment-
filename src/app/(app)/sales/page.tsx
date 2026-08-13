@@ -138,6 +138,20 @@ export default function SalesPage() {
                   </td>
                   <td>
                     {s.bank ? <Badge tone="b-blue">{bankShort(s.bank)}</Badge> : '—'}
+                    {s.txnRef || s.txnPhoto ? (
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: 'var(--muted)',
+                          marginTop: '2px',
+                          maxWidth: '130px',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {s.txnRef}
+                        {s.txnPhoto ? (s.txnRef ? ' · slip' : 'slip attached') : ''}
+                      </div>
+                    ) : null}
                   </td>
                   <td>
                     {s.discount ? (

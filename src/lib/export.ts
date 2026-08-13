@@ -5,7 +5,7 @@ import { exportCSV, fd } from './utils';
 
 export function exportSalesCsv(db: Db, list: Sale[]): void {
   exportCSV('sales-report.csv', [
-    ['Ref', 'Date', 'Cashier', 'Lines', 'Method', 'Bank', 'Discount', 'Total'],
+    ['Ref', 'Date', 'Cashier', 'Lines', 'Method', 'Bank', 'Txn no.', 'Slip', 'Discount', 'Total'],
     ...list.map((s) => [
       s.ref,
       fd(s.createdAt),
@@ -13,6 +13,8 @@ export function exportSalesCsv(db: Db, list: Sale[]): void {
       s.items.length,
       payMethodLabel(s.payMethod),
       s.bank ? bankShort(s.bank) : '',
+      s.txnRef ?? '',
+      s.txnPhoto ? 'yes' : '',
       s.discountPct + '%',
       s.total.toFixed(2),
     ]),

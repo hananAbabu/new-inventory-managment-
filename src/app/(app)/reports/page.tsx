@@ -29,7 +29,7 @@ const REPORT_TABS: { key: ReportTab; label: string; roles: Role[] }[] = [
   { key: 'banks', label: 'Banks', roles: ['admin'] },
   { key: 'inventory', label: 'Inventory', roles: ['admin', 'storekeeper'] },
   { key: 'lowstock', label: 'Low Stock', roles: ['admin', 'storekeeper'] },
-  { key: 'performance', label: 'Product Performance', roles: ['admin', 'storekeeper'] },
+  { key: 'performance', label: 'Product Performance', roles: ['admin'] },
   { key: 'cashiers', label: 'Cashier Sales', roles: ['admin'] },
   { key: 'profit', label: 'Profit', roles: ['admin'] },
 ];
@@ -421,8 +421,12 @@ function BanksReport({ from }: { from: number }) {
 }
 
 function InventoryReport() {
-  const { db, money } = useStore();
-  const list = [...db.products].sort((a, b) => b.qty * b.costPrice - a.qty * a.costPrice);
+  const { db, me, money } = useStore();
+  // Stock valuation is owner information; the storekeeper sees quantities only.
+  const showValues = me!.role === 'admin';
+  const list = showValues
+    ? [...db.products].sort((a, b) => b.qty * b.costPrice - a.qty * a.costPrice)
+    : [...db.products].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="tbl-wrap">
@@ -432,8 +436,9 @@ function InventoryReport() {
             <th>SKU</th>
             <th>Product</th>
             <th className="num">On hand</th>
-            <th className="num">Cost value</th>
-            <th className="num">Retail value</th>
+            <th className="num">Minimum</th>
+            {showValues ? <th className="num">Cost value</th> : null}
+            {showValues ? <th className="num">Retail value</th> : null}
             <th>Status</th>
           </tr>
         </thead>
@@ -447,8 +452,9 @@ function InventoryReport() {
                 </td>
                 <td>{p.name}</td>
                 <td className="num">{formatQty(p.qty, p.unit)}</td>
-                <td className="num">{money(p.qty * p.costPrice)}</td>
-                <td className="num">{money(p.qty * p.sellPrice)}</td>
+                <td className="num">{formatQtyNumber(p.minStock)}</td>
+                {showValues ? <td className="num">{money(p.qty * p.costPrice)}</td> : null}
+                {showValues ? <td className="num">{money(p.qty * p.sellPrice)}</td> : null}
                 <td>
                   <Badge tone={st.tone}>{st.label}</Badge>
                 </td>
@@ -464,11 +470,18 @@ function InventoryReport() {
               <b>{db.products.length} SKUs</b>
             </td>
             <td className="num">
-              <b>{money(db.products.reduce((a, p) => a + p.qty * p.costPrice, 0))}</b>
+              <b>{db.products.filter((p) => p.qty <= p.minStock).length} low</b>
             </td>
-            <td className="num">
-              <b>{money(db.products.reduce((a, p) => a + p.qty * p.sellPrice, 0))}</b>
-            </td>
+            {showValues ? (
+              <td className="num">
+                <b>{money(db.products.reduce((a, p) => a + p.qty * p.costPrice, 0))}</b>
+              </td>
+            ) : null}
+            {showValues ? (
+              <td className="num">
+                <b>{money(db.products.reduce((a, p) => a + p.qty * p.sellPrice, 0))}</b>
+              </td>
+            ) : null}
             <td />
           </tr>
         </tbody>
