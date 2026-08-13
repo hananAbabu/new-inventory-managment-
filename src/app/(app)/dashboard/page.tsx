@@ -11,20 +11,21 @@ import {
   catName,
   inventoryValue,
   lowStock,
+  retailValue,
   stockState,
   supName,
   txBadge,
-  unitsOnHand,
   userName,
 } from '@/lib/selectors';
 import type { Db, Sale } from '@/lib/types';
+import { formatQty, formatQtyNumber } from '@/lib/units';
 import { DAY, fd, startOfDay, startOfMonth } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { me } = useStore();
   if (!me) return null;
   if (me.role === 'cashier') return <CashierDashboard />;
-  if (me.role === 'shopkeeper') return <KeeperDashboard />;
+  if (me.role === 'storekeeper') return <KeeperDashboard />;
   return <AdminDashboard />;
 }
 
@@ -146,7 +147,13 @@ function AdminDashboard() {
           tone="green"
           sub="gross margin after discounts"
         />
-        <Kpi label="Units on hand" value={unitsOnHand(db)} icon="inbox" tone="blue" sub="across all SKUs" />
+        <Kpi
+          label="Retail value"
+          value={money(retailValue(db))}
+          icon="inbox"
+          tone="blue"
+          sub="if all stock sells"
+        />
       </div>
 
       <div className="grid two-col" style={{ marginTop: '16px' }}>
@@ -253,15 +260,15 @@ function AdminDashboard() {
   );
 }
 
-/* ---------------- shopkeeper ---------------- */
+/* ---------------- storekeeper ---------------- */
 
 function KeeperDashboard() {
   const { db, money } = useStore();
   const low = lowStock(db);
+  // Quantities span pieces, kilograms and litres, so this counts receipts, not a mixed-unit total.
   const recv30 = db.invTx
     .filter((t) => t.type === 'purchase' || t.type === 'received')
-    .filter((t) => t.date >= Date.now() - 30 * DAY)
-    .reduce((a, t) => a + t.qty, 0);
+    .filter((t) => t.date >= Date.now() - 30 * DAY).length;
   const moves = [...db.invTx].sort((a, b) => b.date - a.date).slice(0, 8);
 
   const catMap: Record<number, number> = {};
@@ -280,9 +287,15 @@ function KeeperDashboard() {
           tone="green"
           sub={`${db.categories.length} categories`}
         />
-        <Kpi label="Units on hand" value={unitsOnHand(db)} icon="cube" tone="blue" />
+        <Kpi
+          label="Out of stock"
+          value={db.products.filter((p) => p.qty <= 0).length}
+          icon="cube"
+          tone="blue"
+          sub="SKUs at zero"
+        />
         <Kpi label="Inventory value" value={money(inventoryValue(db))} icon="chart" tone="violet" sub="at cost price" />
-        <Kpi label="Stock received (30d)" value={`${recv30} u`} icon="truck" tone="green" />
+        <Kpi label="Stock receipts (30d)" value={recv30} icon="truck" tone="green" />
         <Kpi
           label="Low-stock products"
           value={low.length}
@@ -320,8 +333,8 @@ function KeeperDashboard() {
                           <b>{p.name}</b>
                           <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.sku}</div>
                         </td>
-                        <td className="num">{p.qty}</td>
-                        <td className="num">{p.minStock}</td>
+                        <td className="num">{formatQty(p.qty, p.unit)}</td>
+                        <td className="num">{formatQtyNumber(p.minStock)}</td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>
                         </td>
@@ -407,7 +420,7 @@ function KeeperDashboard() {
                       style={{ fontWeight: 800, color: t.qty < 0 ? 'var(--danger)' : 'var(--brand)' }}
                     >
                       {t.qty > 0 ? '+' : ''}
-                      {t.qty}
+                      {formatQty(t.qty, t.unit)}
                     </td>
                     <td>{userName(db, t.userId)}</td>
                   </tr>

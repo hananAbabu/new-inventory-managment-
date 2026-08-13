@@ -5,8 +5,10 @@ import { createPortal } from 'react-dom';
 import { Icon } from './icon';
 import { Modal, ModalBody, ModalFooter } from './modal';
 import { useStore } from './store';
+import { bankShort, payMethodLabel } from '@/lib/banks';
 import { userName } from '@/lib/selectors';
 import type { Sale } from '@/lib/types';
+import { formatQty } from '@/lib/units';
 import { fd } from '@/lib/utils';
 
 export function ReceiptView({ sale }: { sale: Sale }) {
@@ -34,7 +36,7 @@ export function ReceiptView({ sale }: { sale: Sale }) {
           {sale.items.map((i) => (
             <tr key={i.productId}>
               <td>
-                {i.qty} × {i.name}
+                {formatQty(i.qty, i.unit)} × {i.name}
                 <br />
                 <span style={{ color: 'var(--muted)' }}>{i.sku}</span>
               </td>
@@ -67,9 +69,15 @@ export function ReceiptView({ sale }: { sale: Sale }) {
             <td style={{ textAlign: 'right' }}>{money(sale.total)}</td>
           </tr>
           <tr>
-            <td>Paid ({sale.payMethod})</td>
+            <td>Paid ({payMethodLabel(sale.payMethod)})</td>
             <td style={{ textAlign: 'right' }}>{money(sale.amountPaid)}</td>
           </tr>
+          {sale.bank ? (
+            <tr>
+              <td>Bank</td>
+              <td style={{ textAlign: 'right' }}>{bankShort(sale.bank)}</td>
+            </tr>
+          ) : null}
           <tr>
             <td>Change</td>
             <td style={{ textAlign: 'right' }}>{money(sale.change)}</td>

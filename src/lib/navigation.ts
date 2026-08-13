@@ -9,17 +9,17 @@ export interface PageDef {
 
 /** Route table — the Next.js equivalent of the original PAGES map. */
 export const PAGES: PageDef[] = [
-  { path: '/dashboard', title: 'Dashboard', roles: ['admin', 'shopkeeper', 'cashier'] },
+  { path: '/dashboard', title: 'Dashboard', roles: ['admin', 'storekeeper', 'cashier'] },
   { path: '/pos', title: 'Point of Sale', roles: ['admin', 'cashier'] },
-  { path: '/products', title: 'Products', roles: ['admin', 'shopkeeper'] },
+  { path: '/products', title: 'Products', roles: ['admin', 'storekeeper'] },
   { path: '/categories', title: 'Categories', roles: ['admin'] },
-  { path: '/inventory', title: 'Inventory', roles: ['admin', 'shopkeeper'] },
-  { path: '/low-stock', title: 'Low Stock Monitor', roles: ['admin', 'shopkeeper'] },
+  { path: '/inventory', title: 'Inventory', roles: ['admin', 'storekeeper'] },
+  { path: '/low-stock', title: 'Low Stock Monitor', roles: ['admin', 'storekeeper'] },
   { path: '/sales', title: 'Sales History', roles: ['admin'] },
   { path: '/my-sales', title: 'My Sales', roles: ['cashier'] },
-  { path: '/suppliers', title: 'Suppliers', roles: ['admin', 'shopkeeper'] },
-  { path: '/purchases', title: 'Purchases', roles: ['admin', 'shopkeeper'] },
-  { path: '/reports', title: 'Reports', roles: ['admin', 'shopkeeper'] },
+  { path: '/suppliers', title: 'Suppliers', roles: ['admin', 'storekeeper'] },
+  { path: '/purchases', title: 'Purchases', roles: ['admin', 'storekeeper'] },
+  { path: '/reports', title: 'Reports', roles: ['admin', 'storekeeper'] },
   { path: '/users', title: 'Users & Roles', roles: ['admin'] },
   { path: '/audit', title: 'Audit Log', roles: ['admin'] },
   { path: '/settings', title: 'System Settings', roles: ['admin'] },
@@ -88,7 +88,7 @@ export function navFor(role: Role): NavGroup[] {
       },
     ];
 
-  if (role === 'shopkeeper')
+  if (role === 'storekeeper')
     return [
       { group: 'Overview', items: [{ path: '/dashboard', label: 'Dashboard', icon: 'dashboard' }] },
       { group: 'Catalog', items: [{ path: '/products', label: 'Products', icon: 'tag' }] },

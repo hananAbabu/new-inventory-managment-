@@ -6,6 +6,7 @@ import { Icon } from '@/components/icon';
 import { ReceiptModal } from '@/components/receipt';
 import { useStore } from '@/components/store';
 import { Badge, EmptyState, Pager, usePaged } from '@/components/ui';
+import { bankShort, payMethodLabel } from '@/lib/banks';
 import type { Sale } from '@/lib/types';
 import { fd } from '@/lib/utils';
 
@@ -43,6 +44,7 @@ export default function MySalesPage() {
                   <th>Date</th>
                   <th className="num">Items</th>
                   <th>Method</th>
+                  <th>Bank</th>
                   <th className="num">Total</th>
                   <th />
                 </tr>
@@ -54,10 +56,11 @@ export default function MySalesPage() {
                       <b>{s.ref}</b>
                     </td>
                     <td>{fd(s.createdAt)}</td>
-                    <td className="num">{s.items.reduce((a, i) => a + i.qty, 0)}</td>
+                    <td className="num">{s.items.length}</td>
                     <td>
-                      <Badge tone="b-gray">{s.payMethod}</Badge>
+                      <Badge tone="b-gray">{payMethodLabel(s.payMethod)}</Badge>
                     </td>
+                    <td>{s.bank ? <Badge tone="b-blue">{bankShort(s.bank)}</Badge> : '—'}</td>
                     <td className="num">
                       <b>{money(s.total)}</b>
                     </td>

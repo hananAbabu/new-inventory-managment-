@@ -12,11 +12,11 @@ import { fdS, initials, uid } from '@/lib/utils';
 
 const ROLE_TONE: Record<Role, BadgeTone> = {
   admin: 'b-violet',
-  shopkeeper: 'b-green',
+  storekeeper: 'b-green',
   cashier: 'b-blue',
 };
 
-const ROLES: Role[] = ['admin', 'shopkeeper', 'cashier'];
+const ROLES: Role[] = ['admin', 'storekeeper', 'cashier'];
 
 export default function UsersPage() {
   const { db, me, update } = useStore();

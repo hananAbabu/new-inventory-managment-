@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/icon';
-import { Modal, ModalBody, ModalFooter } from '@/components/modal';
+import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { Badge, EmptyState, Pager, usePaged } from '@/components/ui';
+import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
 import { supName } from '@/lib/selectors';
-import type { Db, Purchase, PurchaseItem } from '@/lib/types';
+import type { Bank, Db, PayMethod, Purchase, PurchaseItem } from '@/lib/types';
+import { formatQty, parseQty, qtyMin, qtyStep, roundQty, unitShort } from '@/lib/units';
 import { fd, nextRef, uid } from '@/lib/utils';
 
 /** Moves an ordered purchase into stock — the draft-mutating twin of applyReceive(). */
@@ -18,7 +20,7 @@ function applyReceive(draft: Db, purchaseId: number, userId: number) {
   pur.items.forEach((it) => {
     const p = draft.products.find((x) => x.id === it.productId);
     if (!p) return;
-    p.qty += it.qty;
+    p.qty = roundQty(p.qty + it.qty);
     p.costPrice = it.cost;
     p.updatedAt = now;
     draft.invTx.push({
@@ -27,6 +29,7 @@ function applyReceive(draft: Db, purchaseId: number, userId: number) {
       productId: p.id,
       sku: p.sku,
       name: p.name,
+      unit: p.unit,
       type: 'purchase',
       qty: it.qty,
       userId,
@@ -40,8 +43,10 @@ function applyReceive(draft: Db, purchaseId: number, userId: number) {
 export default function PurchasesPage() {
   const { db, me, update, money } = useStore();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Purchase | null>(null);
   const [viewing, setViewing] = useState<Purchase | null>(null);
 
   const list = useMemo(
@@ -50,6 +55,11 @@ export default function PurchasesPage() {
   );
   const { rows, page, pages, setPage, total } = usePaged(list, 8);
 
+  function openForm(purchase: Purchase | null) {
+    setEditing(purchase);
+    setFormOpen(true);
+  }
+
   function receive(pur: Purchase) {
     if (pur.status === 'received') return;
     update((draft, audit) => {
@@ -57,6 +67,32 @@ export default function PurchasesPage() {
       audit('PURCHASE', 'receive', pur.ref + ' received into stock');
     });
     toast(`${pur.ref} received — stock updated`);
+  }
+
+  async function del(pur: Purchase) {
+    // A received order has already moved stock; deleting it would leave the
+    // inventory log describing goods no order accounts for.
+    if (pur.status === 'received') {
+      toast('Received orders cannot be deleted — their stock is already in the log', 'error');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Delete purchase order',
+      message: (
+        <>
+          Delete <b>{pur.ref}</b> ({supName(db, pur.supplierId)}, {money(pur.total)})? It has not
+          been received, so no stock changes.
+        </>
+      ),
+      danger: true,
+      confirm: 'Delete',
+    });
+    if (!ok) return;
+    update((draft, audit) => {
+      draft.purchases = draft.purchases.filter((x) => x.id !== pur.id);
+      audit('PURCHASE', 'delete', `Deleted order ${pur.ref} · ${money(pur.total)}`);
+    });
+    toast('Purchase order deleted');
   }
 
   return (
@@ -68,7 +104,7 @@ export default function PurchasesPage() {
             {db.purchases.filter((p) => p.status === 'ordered').length} pending
           </Badge>
         </span>
-        <button className="btn btn-primary" onClick={() => setFormOpen(true)}>
+        <button className="btn btn-primary" onClick={() => openForm(null)}>
           <Icon name="plus" /> New purchase
         </button>
       </div>
@@ -80,6 +116,7 @@ export default function PurchasesPage() {
               <th>Ref</th>
               <th>Date</th>
               <th>Supplier</th>
+              <th>Payment</th>
               <th className="num">Items</th>
               <th className="num">Total</th>
               <th>Status</th>
@@ -94,7 +131,15 @@ export default function PurchasesPage() {
                 </td>
                 <td>{fd(p.createdAt)}</td>
                 <td>{supName(db, p.supplierId)}</td>
-                <td className="num">{p.items.reduce((a, i) => a + i.qty, 0)}</td>
+                <td>
+                  <Badge tone="b-gray">{payMethodLabel(p.payMethod)}</Badge>
+                  {p.bank ? (
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
+                      {bankShort(p.bank)}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="num">{p.items.length}</td>
                 <td className="num">
                   <b>{money(p.total)}</b>
                 </td>
@@ -108,6 +153,30 @@ export default function PurchasesPage() {
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <button className="icon-btn sm" title="View" onClick={() => setViewing(p)}>
                     <Icon name="eye" />
+                  </button>{' '}
+                  <button
+                    className="icon-btn sm"
+                    title={
+                      p.status === 'received'
+                        ? 'Received orders cannot be edited'
+                        : 'Edit order'
+                    }
+                    disabled={p.status === 'received'}
+                    onClick={() => openForm(p)}
+                  >
+                    <Icon name="pencil" />
+                  </button>{' '}
+                  <button
+                    className="icon-btn sm danger"
+                    title={
+                      p.status === 'received'
+                        ? 'Received orders cannot be deleted'
+                        : 'Delete order'
+                    }
+                    disabled={p.status === 'received'}
+                    onClick={() => del(p)}
+                  >
+                    <Icon name="trash" />
                   </button>{' '}
                   {p.status === 'ordered' ? (
                     <button
@@ -127,7 +196,13 @@ export default function PurchasesPage() {
 
       <Pager total={total} page={page} pages={pages} onPage={setPage} />
 
-      {formOpen ? <PurchaseForm onClose={() => setFormOpen(false)} /> : null}
+      {formOpen ? (
+        <PurchaseForm
+          key={editing?.id ?? 'new'}
+          purchase={editing}
+          onClose={() => setFormOpen(false)}
+        />
+      ) : null}
 
       {viewing ? (
         <PurchaseView
@@ -150,13 +225,17 @@ interface DraftLine {
   cost: number;
 }
 
-function PurchaseForm({ onClose }: { onClose: () => void }) {
+function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClose: () => void }) {
   const { db, me, update, money } = useStore();
   const toast = useToast();
 
-  const [supplierId, setSupplierId] = useState(db.suppliers[0]?.id ?? 0);
+  const [supplierId, setSupplierId] = useState(purchase?.supplierId ?? db.suppliers[0]?.id ?? 0);
+  const [payMethod, setPayMethod] = useState<PayMethod>(purchase?.payMethod ?? 'cash');
+  const [bank, setBank] = useState<Bank>(purchase?.bank ?? 'cbe');
   const [pick, setPick] = useState(db.products[0]?.id ?? 0);
-  const [lines, setLines] = useState<DraftLine[]>([]);
+  const [lines, setLines] = useState<DraftLine[]>(
+    purchase ? purchase.items.map((i) => ({ productId: i.productId, qty: i.qty, cost: i.cost })) : [],
+  );
 
   const orderTotal = lines.reduce((a, l) => a + l.qty * l.cost, 0);
 
@@ -172,17 +251,13 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
 
   function editLine(i: number, key: 'qty' | 'cost', value: string) {
     setLines((prev) =>
-      prev.map((l, idx) =>
-        idx === i
-          ? {
-              ...l,
-              [key]:
-                key === 'qty'
-                  ? Math.max(1, parseInt(value, 10) || 1)
-                  : Math.max(0, parseFloat(value) || 0),
-            }
-          : l,
-      ),
+      prev.map((l, idx) => {
+        if (idx !== i) return l;
+        if (key === 'cost') return { ...l, cost: Math.max(0, parseFloat(value) || 0) };
+        const unit = db.products.find((x) => x.id === l.productId)?.unit ?? 'pcs';
+        const parsed = parseQty(value, unit);
+        return { ...l, qty: Math.max(qtyMin(unit), isNaN(parsed) ? qtyMin(unit) : parsed) };
+      }),
     );
   }
 
@@ -193,12 +268,38 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
     }
     const items: PurchaseItem[] = lines.map((l) => {
       const p = db.products.find((x) => x.id === l.productId)!;
-      return { productId: l.productId, sku: p.sku, name: p.name, qty: l.qty, cost: l.cost };
+      return { productId: l.productId, sku: p.sku, name: p.name, unit: p.unit, qty: l.qty, cost: l.cost };
     });
     const total = items.reduce((a, b) => a + b.qty * b.cost, 0);
     const now = Date.now();
-    const ref = nextRef('P', db.purchases);
+    const chosenBank = needsBank(payMethod) ? bank : null;
 
+    if (purchase) {
+      update((draft, audit) => {
+        const target = draft.purchases.find((x) => x.id === purchase.id);
+        if (!target || target.status === 'received') return;
+        target.supplierId = Number(supplierId);
+        target.payMethod = payMethod;
+        target.bank = chosenBank;
+        target.items = items;
+        target.total = total;
+        if (receiveNow) applyReceive(draft, target.id, me!.id);
+        audit(
+          'PURCHASE',
+          receiveNow ? 'edit+receive' : 'edit',
+          `${target.ref} · ${money(total)} · ${supName(db, Number(supplierId))}`,
+        );
+      });
+      toast(
+        receiveNow
+          ? `${purchase.ref} updated and received — inventory updated`
+          : `Purchase order ${purchase.ref} updated`,
+      );
+      onClose();
+      return;
+    }
+
+    const ref = nextRef('P', db.purchases);
     update((draft, audit) => {
       const pur: Purchase = {
         id: uid(draft.purchases),
@@ -208,6 +309,8 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
         items,
         total,
         status: receiveNow ? 'received' : 'ordered',
+        payMethod,
+        bank: chosenBank,
         createdAt: now,
         receivedAt: receiveNow ? now : null,
       };
@@ -225,23 +328,64 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal open onClose={onClose} size="lg" title="New purchase order">
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title={purchase ? `Edit purchase ${purchase.ref}` : 'New purchase order'}
+    >
       <ModalBody>
-        <div className="field">
-          <label htmlFor="pp-supplier">Supplier *</label>
-          <select
-            id="pp-supplier"
-            className="select"
-            value={supplierId}
-            onChange={(e) => setSupplierId(Number(e.target.value))}
-          >
-            {db.suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '0 14px' }}>
+          <div className="field">
+            <label htmlFor="pp-supplier">Supplier *</label>
+            <select
+              id="pp-supplier"
+              className="select"
+              value={supplierId}
+              onChange={(e) => setSupplierId(Number(e.target.value))}
+            >
+              {db.suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="pp-method">Payment method *</label>
+            <select
+              id="pp-method"
+              className="select"
+              value={payMethod}
+              onChange={(e) => setPayMethod(e.target.value as PayMethod)}
+            >
+              {PAY_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        {needsBank(payMethod) ? (
+          <div className="field">
+            <label htmlFor="pp-bank">Bank *</label>
+            <select
+              id="pp-bank"
+              className="select"
+              value={bank}
+              onChange={(e) => setBank(e.target.value as Bank)}
+            >
+              {BANKS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div className="field">
           <label htmlFor="pp-select">Add products</label>
@@ -254,7 +398,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
             >
               {db.products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.sku} — {p.name}
+                  {p.sku} — {p.name} ({unitShort(p.unit)})
                 </option>
               ))}
             </select>
@@ -269,7 +413,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
             <thead>
               <tr>
                 <th>Product</th>
-                <th style={{ width: '90px' }}>Qty</th>
+                <th style={{ width: '110px' }}>Qty</th>
                 <th style={{ width: '120px' }}>Unit cost</th>
                 <th className="num">Line total</th>
                 <th />
@@ -284,14 +428,20 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
                       <b>{p.sku}</b> {p.name}
                     </td>
                     <td>
-                      <input
-                        className="input"
-                        type="number"
-                        min="1"
-                        value={l.qty}
-                        onChange={(e) => editLine(i, 'qty', e.target.value)}
-                        aria-label={`Quantity for ${p.sku}`}
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <input
+                          className="input"
+                          type="number"
+                          min={qtyMin(p.unit)}
+                          step={qtyStep(p.unit)}
+                          value={l.qty}
+                          onChange={(e) => editLine(i, 'qty', e.target.value)}
+                          aria-label={`Quantity for ${p.sku} in ${unitShort(p.unit)}`}
+                        />
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                          {unitShort(p.unit)}
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <input
@@ -340,7 +490,7 @@ function PurchaseForm({ onClose }: { onClose: () => void }) {
           Cancel
         </button>
         <button className="btn btn-ghost" onClick={() => save(false)}>
-          <Icon name="inbox" /> Save as ordered
+          <Icon name="inbox" /> {purchase ? 'Save changes' : 'Save as ordered'}
         </button>
         <button className="btn btn-primary" onClick={() => save(true)}>
           <Icon name="check" /> Save &amp; receive stock
@@ -381,6 +531,13 @@ function PurchaseView({
             Created: <b style={{ color: 'var(--ink)' }}>{fd(purchase.createdAt)}</b>
           </span>
           <span>
+            Paid by:{' '}
+            <b style={{ color: 'var(--ink)' }}>
+              {payMethodLabel(purchase.payMethod)}
+              {purchase.bank ? ` · ${bankShort(purchase.bank)}` : ''}
+            </b>
+          </span>
+          <span>
             Status:{' '}
             {purchase.status === 'received' ? (
               <Badge tone="b-green">Received</Badge>
@@ -405,7 +562,7 @@ function PurchaseView({
                 <td>
                   <b>{i.sku}</b> {i.name}
                 </td>
-                <td className="num">{i.qty}</td>
+                <td className="num">{formatQty(i.qty, i.unit)}</td>
                 <td className="num">{money(i.cost)}</td>
                 <td className="num">{money(i.qty * i.cost)}</td>
               </tr>

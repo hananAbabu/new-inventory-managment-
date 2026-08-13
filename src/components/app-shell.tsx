@@ -7,6 +7,7 @@ import { Icon } from './icon';
 import { useStore } from './store';
 import { can, navFor, pageFor } from '@/lib/navigation';
 import { lowStock } from '@/lib/selectors';
+import { formatQty } from '@/lib/units';
 import { initials } from '@/lib/utils';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -27,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const page = pageFor(pathname);
   const low = lowStock(db);
-  const showBell = me.role === 'admin' || me.role === 'shopkeeper';
+  const showBell = me.role === 'admin' || me.role === 'storekeeper';
   const allowed = can(me.role, pathname);
   const title = page?.title ?? 'Dashboard';
 
@@ -185,11 +186,11 @@ function NotificationBell() {
                   router.push('/low-stock');
                 }}
               >
-                <span className="badge b-amber">{p.qty} left</span>
+                <span className="badge b-amber">{formatQty(p.qty, p.unit)} left</span>
                 <div>
                   <b>{p.name}</b>
                   <div style={{ color: 'var(--muted)', fontSize: '11.5px' }}>
-                    {p.sku} · min {p.minStock}
+                    {p.sku} · min {formatQty(p.minStock, p.unit)}
                   </div>
                 </div>
               </button>

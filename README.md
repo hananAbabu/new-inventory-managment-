@@ -13,11 +13,11 @@ npm run dev
 
 Then open http://localhost:3000. Demo accounts:
 
-| Role       | Username  | Password     |
-| ---------- | --------- | ------------ |
-| Admin      | `admin`   | `admin123`   |
-| Shopkeeper | `keeper`  | `keeper123`  |
-| Cashier    | `cashier` | `cashier123` |
+| Role        | Username  | Password     |
+| ----------- | --------- | ------------ |
+| Admin       | `admin`   | `admin123`   |
+| Storekeeper | `keeper`  | `keeper123`  |
+| Cashier     | `cashier` | `cashier123` |
 
 Other scripts: `npm run build`, `npm start`, `npm run typecheck`.
 
@@ -53,12 +53,40 @@ src/
   lib/
     types.ts             every entity in the workspace
     seed.ts              the demo dataset (deterministic PRNG)
+    migrate.ts           upgrades workspaces saved by an older build
+    banks.ts             payment methods and the bank list
+    units.ts             units of measure and quantity parsing/formatting
     selectors.ts         derived reads: money, low stock, badges, names
     navigation.ts        route table, per-role permissions, sidebar
     export.ts            sales CSV export
     schema-sql.ts        the reference relational schema shown in Settings
     utils.ts             dates, ids, refs, CSV writer
 ```
+
+### Payments and banks
+
+Every sale and every purchase records how the money moved: **cash**, **transfer**
+or **debit**. Transfer and debit also name the account — CBE, BOA, Awash, Dashen,
+Coop, Oromiya, Shebele or Check — while cash stores `null`. The bank picker only
+appears for the methods that need one, so a cash sale can never carry a stale
+bank.
+
+Reports has a **Banks** tab that reconciles each account on its own: money
+received through it (sales), money paid out of it (received purchases), and the
+net, with cash totals shown separately so nothing is double-counted.
+
+### Units of measure
+
+Products carry a unit: **pcs**, **carton**, **kg** or **L**. Weight and volume
+accept fractions (a 0.01 step, rounded to three decimals to keep float drift out
+of stock levels); pieces and cartons stay whole. Prices are per unit, and every
+quantity in the UI — stock levels, cart lines, purchase lines, movements,
+receipts — is printed with its unit.
+
+One consequence worth knowing: a total that mixes kilograms with pieces means
+nothing, so aggregate counters report **line items** or **SKUs** rather than
+summing quantities across products. Per-product totals (product performance,
+stock levels) are unit-consistent and still add up.
 
 ### Writing to the workspace
 
@@ -83,6 +111,20 @@ update((draft, audit) => {
 to open it; the authenticated layout renders the "Access restricted" panel
 instead of the page when the check fails, and the sidebar only shows what the
 role can reach.
+
+### Purchase orders
+
+An order can be edited or deleted while it is **ordered**. Once **received** it
+is locked: its stock is already in the inventory log, and rewriting or removing
+it would leave that log describing goods no order accounts for. Editing an
+ordered purchase can also receive it in one step.
+
+### Older saved workspaces
+
+`src/lib/migrate.ts` upgrades a workspace saved by an earlier build on load —
+`shopkeeper` becomes `storekeeper`, the `card` and `mobile` payment methods
+become `transfer` and `debit`, products without a unit default to pieces. Nobody
+has to reset their data.
 
 ## Differences from `inv.html`
 

@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { migrate, type LegacyDb } from '@/lib/migrate';
 import { seed } from '@/lib/seed';
 import { money as fmtMoney } from '@/lib/selectors';
 import type { Db, Session, User } from '@/lib/types';
@@ -38,8 +39,12 @@ function loadDb(): Db {
   try {
     const raw = localStorage.getItem(LS_DB);
     if (raw) {
-      const d = JSON.parse(raw) as Db;
-      if (d && d.users && d.settings && d.products) return d;
+      const d = JSON.parse(raw) as LegacyDb;
+      if (d && d.users && d.settings && d.products) {
+        const upgraded = migrate(d);
+        localStorage.setItem(LS_DB, JSON.stringify(upgraded));
+        return upgraded;
+      }
     }
   } catch {
     /* corrupt payload — fall through to a fresh seed */

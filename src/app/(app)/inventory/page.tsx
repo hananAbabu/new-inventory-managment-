@@ -5,8 +5,9 @@ import { MovementForm, type MovementType } from '@/components/forms/movement-for
 import { Icon } from '@/components/icon';
 import { useStore } from '@/components/store';
 import { Badge, EmptyState, Pager, StatStrip, Tabs, usePaged } from '@/components/ui';
-import { inventoryValue, retailValue, stockState, txBadge, unitsOnHand, userName } from '@/lib/selectors';
+import { inventoryValue, retailValue, stockState, txBadge, userName } from '@/lib/selectors';
 import type { TxType } from '@/lib/types';
+import { formatQty, formatQtyNumber } from '@/lib/units';
 import { fd, titleCase } from '@/lib/utils';
 
 type Tab = 'levels' | 'log';
@@ -35,7 +36,7 @@ export default function InventoryPage() {
         <StatStrip
           stats={[
             { label: 'SKUs', value: db.products.length },
-            { label: 'Units on hand', value: unitsOnHand(db) },
+            { label: 'Out of stock', value: db.products.filter((p) => p.qty <= 0).length },
             { label: 'Value at cost', value: money(costV) },
             { label: 'Value at retail', value: money(retV) },
             { label: 'Potential margin', value: money(retV - costV), accent: true },
@@ -111,9 +112,9 @@ function StockLevels({ onMove }: { onMove: (productId: number, type: MovementTyp
                   </td>
                   <td>{p.name}</td>
                   <td className="num">
-                    <b>{p.qty}</b>
+                    <b>{formatQty(p.qty, p.unit)}</b>
                   </td>
-                  <td className="num">{p.minStock}</td>
+                  <td className="num">{formatQtyNumber(p.minStock)}</td>
                   <td>
                     <Badge tone={st.tone}>{st.label}</Badge>
                   </td>
@@ -223,7 +224,7 @@ function MovementLog() {
                       style={{ fontWeight: 800, color: t.qty < 0 ? 'var(--danger)' : 'var(--brand)' }}
                     >
                       {t.qty > 0 ? '+' : ''}
-                      {t.qty}
+                      {formatQty(t.qty, t.unit)}
                     </td>
                     <td>{userName(db, t.userId)}</td>
                     <td style={{ color: 'var(--muted)' }}>{t.note || '—'}</td>

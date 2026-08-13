@@ -5,7 +5,8 @@ import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
-import type { Product } from '@/lib/types';
+import type { Product, Unit } from '@/lib/types';
+import { UNITS, formatQty, parseQty, qtyStep, unitShort } from '@/lib/units';
 import { uid } from '@/lib/utils';
 
 interface Props {
@@ -22,6 +23,7 @@ export function ProductForm({ open, product, onClose }: Props) {
   const [name, setName] = useState(product?.name ?? '');
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? db.categories[0]?.id ?? 0);
   const [supplierId, setSupplierId] = useState(product?.supplierId ?? 0);
+  const [unit, setUnit] = useState<Unit>(product?.unit ?? 'pcs');
   const [cost, setCost] = useState(product ? String(product.costPrice) : '');
   const [price, setPrice] = useState(product ? String(product.sellPrice) : '');
   const [qty, setQty] = useState('0');
@@ -41,7 +43,7 @@ export function ProductForm({ open, product, onClose }: Props) {
     }
     const costV = parseFloat(cost);
     const priceV = parseFloat(price);
-    const minV = parseInt(minStock, 10);
+    const minV = parseQty(minStock, unit);
     if (!(costV >= 0) || !(priceV >= 0) || !(minV >= 0)) {
       toast('Prices and minimum stock must be valid numbers', 'error');
       return;
@@ -59,6 +61,7 @@ export function ProductForm({ open, product, onClose }: Props) {
           name: nameV,
           categoryId: Number(categoryId),
           supplierId: supId,
+          unit,
           costPrice: costV,
           sellPrice: priceV,
           minStock: minV,
@@ -68,7 +71,8 @@ export function ProductForm({ open, product, onClose }: Props) {
       });
       toast('Product updated');
     } else {
-      const startQty = Math.max(0, parseInt(qty, 10) || 0);
+      const parsedQty = parseQty(qty, unit);
+      const startQty = Math.max(0, isNaN(parsedQty) ? 0 : parsedQty);
       update((draft, audit) => {
         const np: Product = {
           id: uid(draft.products),
@@ -76,6 +80,7 @@ export function ProductForm({ open, product, onClose }: Props) {
           name: nameV,
           categoryId: Number(categoryId),
           supplierId: supId,
+          unit,
           costPrice: costV,
           sellPrice: priceV,
           qty: startQty,
@@ -91,15 +96,17 @@ export function ProductForm({ open, product, onClose }: Props) {
             productId: np.id,
             sku: skuV,
             name: nameV,
+            unit,
             type: 'initial',
             qty: startQty,
             userId: me!.id,
             note: 'Opening stock',
           });
-        audit('PRODUCT', 'add', `Added ${skuV} — ${nameV}`);
+        audit('PRODUCT', 'add', `Added ${skuV} — ${nameV} (${unitShort(unit)})`);
       });
       toast('Product added');
-      if (startQty <= minV) toast(`${skuV} created at/below minimum stock`, 'warning');
+      if (startQty <= minV)
+        toast(`${skuV} created at/below minimum stock (${formatQty(startQty, unit)})`, 'warning');
     }
 
     onClose();
@@ -169,7 +176,24 @@ export function ProductForm({ open, product, onClose }: Props) {
               </select>
             </div>
             <div className="field">
-              <label htmlFor="pf-cost">Purchase price (cost) *</label>
+              <label htmlFor="pf-unit">Unit of measure *</label>
+              <select
+                id="pf-unit"
+                className="select"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as Unit)}
+                required
+              >
+                {UNITS.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+              <span className="hint">Kilogram and litre accept fractions; pieces and cartons do not.</span>
+            </div>
+            <div className="field">
+              <label htmlFor="pf-cost">Purchase price (cost) — per {unitShort(unit)} *</label>
               <input
                 id="pf-cost"
                 className="input"
@@ -182,7 +206,7 @@ export function ProductForm({ open, product, onClose }: Props) {
               />
             </div>
             <div className="field">
-              <label htmlFor="pf-price">Selling price *</label>
+              <label htmlFor="pf-price">Selling price — per {unitShort(unit)} *</label>
               <input
                 id="pf-price"
                 className="input"
@@ -196,24 +220,26 @@ export function ProductForm({ open, product, onClose }: Props) {
             </div>
             {product ? null : (
               <div className="field">
-                <label htmlFor="pf-qty">Initial quantity</label>
+                <label htmlFor="pf-qty">Initial quantity ({unitShort(unit)})</label>
                 <input
                   id="pf-qty"
                   className="input"
                   type="number"
                   min="0"
+                  step={qtyStep(unit)}
                   value={qty}
                   onChange={(e) => setQty(e.target.value)}
                 />
               </div>
             )}
             <div className="field">
-              <label htmlFor="pf-min">Minimum stock level *</label>
+              <label htmlFor="pf-min">Minimum stock level ({unitShort(unit)}) *</label>
               <input
                 id="pf-min"
                 className="input"
                 type="number"
                 min="0"
+                step={qtyStep(unit)}
                 value={minStock}
                 onChange={(e) => setMinStock(e.target.value)}
                 required

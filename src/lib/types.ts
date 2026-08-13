@@ -1,5 +1,15 @@
-export type Role = 'admin' | 'shopkeeper' | 'cashier';
-export type PayMethod = 'cash' | 'card' | 'mobile';
+export type Role = 'admin' | 'storekeeper' | 'cashier';
+export type PayMethod = 'cash' | 'transfer' | 'debit';
+export type Bank =
+  | 'cbe'
+  | 'boa'
+  | 'awash'
+  | 'dashen'
+  | 'coop'
+  | 'oromiya'
+  | 'shebele'
+  | 'check';
+export type Unit = 'pcs' | 'kg' | 'l' | 'carton';
 export type PurchaseStatus = 'ordered' | 'received';
 export type TxType =
   | 'initial'
@@ -52,6 +62,7 @@ export interface Product {
   name: string;
   categoryId: number;
   supplierId: number | null;
+  unit: Unit;
   costPrice: number;
   sellPrice: number;
   qty: number;
@@ -64,6 +75,7 @@ export interface SaleItem {
   productId: number;
   sku: string;
   name: string;
+  unit: Unit;
   price: number;
   cost: number;
   qty: number;
@@ -80,6 +92,8 @@ export interface Sale {
   tax: number;
   total: number;
   payMethod: PayMethod;
+  /** Which bank cleared the money — null for cash. */
+  bank: Bank | null;
   amountPaid: number;
   change: number;
   createdAt: number;
@@ -89,6 +103,7 @@ export interface PurchaseItem {
   productId: number;
   sku: string;
   name: string;
+  unit: Unit;
   qty: number;
   cost: number;
 }
@@ -101,6 +116,9 @@ export interface Purchase {
   items: PurchaseItem[];
   total: number;
   status: PurchaseStatus;
+  payMethod: PayMethod;
+  /** Which bank the money left from — null for cash. */
+  bank: Bank | null;
   createdAt: number;
   receivedAt: number | null;
 }
@@ -109,6 +127,7 @@ export interface Payment {
   id: number;
   saleId: number;
   method: PayMethod;
+  bank: Bank | null;
   amount: number;
   createdAt: number;
 }
@@ -119,6 +138,7 @@ export interface InvTx {
   productId: number;
   sku: string;
   name: string;
+  unit: Unit;
   type: TxType;
   qty: number;
   userId: number;

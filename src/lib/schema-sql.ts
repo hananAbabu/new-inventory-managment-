@@ -1,7 +1,7 @@
 /** The relational model the demo store mirrors — shown read-only in Settings. */
 export const SCHEMA_SQL = `CREATE TABLE roles (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(30) UNIQUE NOT NULL,          -- admin | shopkeeper | cashier
+  name VARCHAR(30) UNIQUE NOT NULL,          -- admin | storekeeper | cashier
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE users (
@@ -35,10 +35,11 @@ CREATE TABLE products (
   name VARCHAR(120) NOT NULL,
   category_id INT NOT NULL,
   supplier_id INT NULL,
+  unit ENUM('pcs','carton','kg','l') NOT NULL DEFAULT 'pcs',
   cost_price DECIMAL(10,2) NOT NULL CHECK (cost_price >= 0),
   sell_price DECIMAL(10,2) NOT NULL CHECK (sell_price >= 0),
-  quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-  min_stock INT NOT NULL DEFAULT 0,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  min_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (category_id) REFERENCES categories(id),
@@ -50,6 +51,9 @@ CREATE TABLE purchases (
   supplier_id INT NOT NULL,
   created_by INT NOT NULL,
   status ENUM('ordered','received') DEFAULT 'ordered',
+  pay_method ENUM('cash','transfer','debit') NOT NULL DEFAULT 'cash',
+  bank ENUM('cbe','boa','awash','dashen','coop',
+            'oromiya','shebele','check') NULL,   -- null when paid in cash
   total DECIMAL(12,2) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   received_at TIMESTAMP NULL,
@@ -60,7 +64,7 @@ CREATE TABLE purchase_items (
   id INT PRIMARY KEY AUTO_INCREMENT,
   purchase_id INT NOT NULL,
   product_id INT NOT NULL,
-  quantity INT NOT NULL CHECK (quantity > 0),
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   unit_cost DECIMAL(10,2) NOT NULL,
   FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id)
@@ -74,6 +78,9 @@ CREATE TABLE sales (
   discount DECIMAL(12,2) DEFAULT 0,
   tax DECIMAL(12,2) DEFAULT 0,
   total DECIMAL(12,2) NOT NULL,
+  pay_method ENUM('cash','transfer','debit') NOT NULL DEFAULT 'cash',
+  bank ENUM('cbe','boa','awash','dashen','coop',
+            'oromiya','shebele','check') NULL,   -- null when paid in cash
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (cashier_id) REFERENCES users(id)
 );
@@ -81,7 +88,7 @@ CREATE TABLE sale_items (
   id INT PRIMARY KEY AUTO_INCREMENT,
   sale_id INT NOT NULL,
   product_id INT NOT NULL,
-  quantity INT NOT NULL CHECK (quantity > 0),
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   unit_price DECIMAL(10,2) NOT NULL,
   unit_cost DECIMAL(10,2) NOT NULL,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
@@ -90,7 +97,9 @@ CREATE TABLE sale_items (
 CREATE TABLE payments (
   id INT PRIMARY KEY AUTO_INCREMENT,
   sale_id INT NOT NULL,
-  method ENUM('cash','card','mobile') NOT NULL,
+  method ENUM('cash','transfer','debit') NOT NULL,
+  bank ENUM('cbe','boa','awash','dashen','coop',
+            'oromiya','shebele','check') NULL,
   amount DECIMAL(12,2) NOT NULL,
   change_due DECIMAL(12,2) DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -102,7 +111,7 @@ CREATE TABLE inventory_transactions (
   user_id INT NOT NULL,
   type ENUM('initial','purchase','sale','received',
             'damage','lost','adjustment') NOT NULL,
-  quantity INT NOT NULL,              -- signed: + in / - out
+  quantity DECIMAL(12,3) NOT NULL,    -- signed: + in / - out
   note VARCHAR(255),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (product_id) REFERENCES products(id),

@@ -6,6 +6,7 @@ import { ReceiptModal } from '@/components/receipt';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { Badge, EmptyState, Pager, StatStrip, usePaged } from '@/components/ui';
+import { bankShort, payMethodLabel } from '@/lib/banks';
 import { exportSalesCsv } from '@/lib/export';
 import { userName } from '@/lib/selectors';
 import type { Sale } from '@/lib/types';
@@ -100,8 +101,8 @@ export default function SalesPage() {
           { label: 'Transactions', value: list.length },
           { label: 'Revenue', value: money(revenue) },
           {
-            label: 'Items sold',
-            value: list.reduce((a, s) => a + s.items.reduce((x, i) => x + i.qty, 0), 0),
+            label: 'Line items',
+            value: list.reduce((a, s) => a + s.items.length, 0),
           },
           { label: 'Discounts', value: money(list.reduce((a, s) => a + s.discount, 0)) },
         ]}
@@ -116,6 +117,7 @@ export default function SalesPage() {
               <th>Cashier</th>
               <th className="num">Items</th>
               <th>Method</th>
+              <th>Bank</th>
               <th>Disc.</th>
               <th className="num">Total</th>
               <th />
@@ -130,9 +132,12 @@ export default function SalesPage() {
                   </td>
                   <td>{fd(s.createdAt)}</td>
                   <td>{userName(db, s.cashierId)}</td>
-                  <td className="num">{s.items.reduce((a, i) => a + i.qty, 0)}</td>
+                  <td className="num">{s.items.length}</td>
                   <td>
-                    <Badge tone="b-gray">{s.payMethod}</Badge>
+                    <Badge tone="b-gray">{payMethodLabel(s.payMethod)}</Badge>
+                  </td>
+                  <td>
+                    {s.bank ? <Badge tone="b-blue">{bankShort(s.bank)}</Badge> : '—'}
                   </td>
                   <td>
                     {s.discount ? (
@@ -157,7 +162,7 @@ export default function SalesPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <EmptyState icon="receipt" title="No sales in this period" />
                 </td>
               </tr>

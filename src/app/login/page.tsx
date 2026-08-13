@@ -9,7 +9,7 @@ import { lowStock } from '@/lib/selectors';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin / Owner', username: 'admin', password: 'admin123' },
-  { label: 'Shopkeeper', username: 'keeper', password: 'keeper123' },
+  { label: 'Storekeeper', username: 'keeper', password: 'keeper123' },
   { label: 'Cashier', username: 'cashier', password: 'cashier123' },
 ];
 
@@ -36,7 +36,7 @@ export default function LoginPage() {
     const user = db.users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase())!;
     toast(`Signed in as ${user.name} (${user.role})`);
     const low = lowStock(db);
-    if (low.length && (user.role === 'admin' || user.role === 'shopkeeper')) {
+    if (low.length && (user.role === 'admin' || user.role === 'storekeeper')) {
       setTimeout(
         () =>
           toast(
@@ -73,7 +73,7 @@ export default function LoginPage() {
         <div className="login-copy">
           <h2>Run your merch shop from one counter.</h2>
           <p>
-            Role-based dashboards for owners, shopkeepers and cashiers — live inventory tracking, a
+            Role-based dashboards for owners, storekeepers and cashiers — live inventory tracking, a
             fast POS, purchasing and profit reports.
           </p>
         </div>

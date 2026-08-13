@@ -7,8 +7,10 @@ import { ReceiptModal } from '@/components/receipt';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { EmptyState } from '@/components/ui';
-import type { CartLine, PayMethod, Sale, SaleItem } from '@/lib/types';
-import { nextRef, titleCase, uid } from '@/lib/utils';
+import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
+import type { Bank, CartLine, PayMethod, Sale, SaleItem } from '@/lib/types';
+import { formatQty, formatQtyNumber, parseQty, qtyMin, roundQty, unitShort } from '@/lib/units';
+import { nextRef, uid } from '@/lib/utils';
 
 export default function PosPage() {
   const { db, me, update, money } = useStore();
@@ -42,35 +44,41 @@ export default function PosPage() {
     return { subtotal: sub, discount: dAmt, tax, total: sub - dAmt + tax };
   }, [cart, db.products, db.settings.taxRate, discount]);
 
-  const count = cart.reduce((a, l) => a + l.qty, 0);
+  // Quantities can be kg or litres, so the counter reports lines, not a mixed-unit sum.
+  const lineCount = cart.length;
 
   function addToCart(id: number) {
     const p = db.products.find((x) => x.id === id);
     if (!p) return;
     const line = cart.find((l) => l.productId === id);
     const inCart = line ? line.qty : 0;
-    if (p.qty - inCart <= 0) {
+    const available = roundQty(p.qty - inCart);
+    if (available < qtyMin(p.unit)) {
       toast(`No more stock available for ${p.name}`, 'error');
       return;
     }
+    // One unit per click — or the remainder when less than one is left.
+    const add = Math.min(1, available);
     setCart((prev) =>
       line
-        ? prev.map((l) => (l.productId === id ? { ...l, qty: l.qty + 1 } : l))
-        : [...prev, { productId: id, qty: 1 }],
+        ? prev.map((l) => (l.productId === id ? { ...l, qty: roundQty(l.qty + add) } : l))
+        : [...prev, { productId: id, qty: add }],
     );
   }
 
-  function cartDelta(id: number, d: number) {
+  function cartDelta(id: number, direction: 1 | -1) {
     const p = db.products.find((x) => x.id === id);
     const line = cart.find((l) => l.productId === id);
     if (!line || !p) return;
-    const next = line.qty + d;
-    if (next < 1) {
+    // Measured goods step by whole units; you can still type an exact amount.
+    const step = 1;
+    const next = roundQty(line.qty + direction * step);
+    if (next < qtyMin(p.unit)) {
       removeLine(id);
       return;
     }
     if (next > p.qty) {
-      toast(`Only ${p.qty} in stock`, 'error');
+      toast(`Only ${formatQty(p.qty, p.unit)} in stock`, 'error');
       return;
     }
     setCart((prev) => prev.map((l) => (l.productId === id ? { ...l, qty: next } : l)));
@@ -79,8 +87,9 @@ export default function PosPage() {
   function setQty(id: number, val: string) {
     const p = db.products.find((x) => x.id === id);
     if (!p) return;
-    const q2 = Math.max(1, Math.min(p.qty, parseInt(val, 10) || 1));
-    setCart((prev) => prev.map((l) => (l.productId === id ? { ...l, qty: q2 } : l)));
+    const parsed = parseQty(val, p.unit);
+    const q2 = Math.max(qtyMin(p.unit), Math.min(p.qty, isNaN(parsed) ? qtyMin(p.unit) : parsed));
+    setCart((prev) => prev.map((l) => (l.productId === id ? { ...l, qty: roundQty(q2) } : l)));
   }
 
   function removeLine(id: number) {
@@ -117,7 +126,7 @@ export default function PosPage() {
     setDiscount(d);
   }
 
-  function completeSale(method: PayMethod, paid: number) {
+  function completeSale(method: PayMethod, bank: Bank | null, paid: number) {
     if (!cart.length) return;
     for (const l of cart) {
       const p = db.products.find((x) => x.id === l.productId);
@@ -134,6 +143,7 @@ export default function PosPage() {
         productId: p.id,
         sku: p.sku,
         name: p.name,
+        unit: p.unit,
         price: p.sellPrice,
         cost: p.costPrice,
         qty: l.qty,
@@ -151,6 +161,7 @@ export default function PosPage() {
       tax: totals.tax,
       total: totals.total,
       payMethod: method,
+      bank,
       amountPaid: paid,
       change: Math.max(0, paid - totals.total),
       createdAt: now,
@@ -162,13 +173,14 @@ export default function PosPage() {
         id: uid(draft.payments),
         saleId: sale.id,
         method,
+        bank,
         amount: paid,
         createdAt: now,
       });
       items.forEach((it) => {
         const p = draft.products.find((x) => x.id === it.productId);
         if (!p) return;
-        p.qty -= it.qty;
+        p.qty = roundQty(p.qty - it.qty);
         p.updatedAt = now;
         draft.invTx.push({
           id: uid(draft.invTx),
@@ -176,6 +188,7 @@ export default function PosPage() {
           productId: p.id,
           sku: it.sku,
           name: it.name,
+          unit: it.unit,
           type: 'sale',
           qty: -it.qty,
           userId: me!.id,
@@ -185,14 +198,16 @@ export default function PosPage() {
       audit(
         'SALE',
         'sale',
-        `${sale.ref} · ${money(sale.total)} · ${items.reduce((a, b) => a + b.qty, 0)} items · ${method}`,
+        `${sale.ref} · ${money(sale.total)} · ${items.length} lines · ${payMethodLabel(method)}${
+          bank ? ' (' + bankShort(bank) + ')' : ''
+        }`,
       );
     });
 
     const lowNow = items
       .map((it) => {
         const p = db.products.find((x) => x.id === it.productId);
-        return p ? { ...p, qty: p.qty - it.qty } : null;
+        return p ? { ...p, qty: roundQty(p.qty - it.qty) } : null;
       })
       .filter((p) => p && p.qty <= p.minStock);
 
@@ -200,7 +215,13 @@ export default function PosPage() {
     setPayOpen(false);
     toast(`Sale ${sale.ref} completed — ${money(sale.total)}`);
     lowNow.forEach((p) =>
-      toast(`${p!.name} is low on stock (${p!.qty} left, min ${p!.minStock})`, 'warning'),
+      toast(
+        `${p!.name} is low on stock (${formatQty(p!.qty, p!.unit)} left, min ${formatQty(
+          p!.minStock,
+          p!.unit,
+        )})`,
+        'warning',
+      ),
     );
     setReceipt(sale);
   }
@@ -246,26 +267,33 @@ export default function PosPage() {
             {grid.length ? (
               grid.map((p) => {
                 const inCart = cart.find((l) => l.productId === p.id)?.qty ?? 0;
-                const avail = p.qty - inCart;
+                const avail = roundQty(p.qty - inCart);
+                const out = avail < qtyMin(p.unit);
                 return (
                   <button
                     key={p.id}
-                    className={`p-card ${avail <= 0 ? 'off' : ''}`}
+                    className={`p-card ${out ? 'off' : ''}`}
                     onClick={() => addToCart(p.id)}
-                    disabled={avail <= 0}
+                    disabled={out}
                   >
                     <span className="p-stk">
-                      {avail <= 0 ? (
+                      {out ? (
                         <span className="badge b-red">0</span>
                       ) : p.qty <= p.minStock ? (
-                        <span className="badge b-amber">{avail}</span>
+                        <span className="badge b-amber">{formatQty(avail, p.unit)}</span>
                       ) : (
-                        <span className="badge b-gray">{avail}</span>
+                        <span className="badge b-gray">{formatQty(avail, p.unit)}</span>
                       )}
                     </span>
                     <span className="p-name">{p.name}</span>
                     <span className="p-sku">{p.sku}</span>
-                    <span className="p-price">{money(p.sellPrice)}</span>
+                    <span className="p-price">
+                      {money(p.sellPrice)}
+                      <span style={{ color: 'var(--muted)', fontWeight: 600, fontSize: '11px' }}>
+                        {' '}
+                        / {unitShort(p.unit)}
+                      </span>
+                    </span>
                   </button>
                 );
               })
@@ -283,7 +311,7 @@ export default function PosPage() {
           <div className="card-h">
             <h3>Current sale</h3>
             <span className="badge b-gray" style={{ marginLeft: 'auto' }}>
-              {count} item{count === 1 ? '' : 's'}
+              {lineCount} item{lineCount === 1 ? '' : 's'}
             </span>
             <button className="icon-btn sm danger" title="Clear" onClick={clearCart}>
               <Icon name="trash" />
@@ -301,15 +329,15 @@ export default function PosPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <b style={{ fontSize: '12.5px' }}>{p.name}</b>
                           <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                            {money(p.sellPrice)} each
+                            {money(p.sellPrice)} per {unitShort(p.unit)}
                           </div>
                         </div>
                         <div className="qty-box">
                           <button onClick={() => cartDelta(p.id, -1)}>−</button>
                           <input
-                            value={l.qty}
+                            value={formatQtyNumber(l.qty)}
                             onChange={(e) => setQty(p.id, e.target.value)}
-                            aria-label={`Quantity for ${p.name}`}
+                            aria-label={`Quantity for ${p.name} in ${unitShort(p.unit)}`}
                           />
                           <button onClick={() => cartDelta(p.id, 1)}>+</button>
                         </div>
@@ -393,7 +421,7 @@ export default function PosPage() {
       {payOpen ? (
         <PaymentModal
           total={totals.total}
-          itemCount={count}
+          itemCount={lineCount}
           discountPct={discount}
           onClose={() => setPayOpen(false)}
           onComplete={completeSale}
@@ -416,11 +444,12 @@ function PaymentModal({
   itemCount: number;
   discountPct: number;
   onClose: () => void;
-  onComplete: (method: PayMethod, paid: number) => void;
+  onComplete: (method: PayMethod, bank: Bank | null, paid: number) => void;
 }) {
   const { money } = useStore();
   const toast = useToast();
   const [method, setMethod] = useState<PayMethod>('cash');
+  const [bank, setBank] = useState<Bank>('cbe');
   const [paidInput, setPaidInput] = useState('');
 
   const paid = method === 'cash' ? parseFloat(paidInput) : total;
@@ -441,7 +470,11 @@ function PaymentModal({
       toast('Cash received is less than the total', 'error');
       return;
     }
-    onComplete(method, method === 'cash' ? paid : total);
+    if (needsBank(method) && !bank) {
+      toast('Select the bank that received the payment', 'error');
+      return;
+    }
+    onComplete(method, needsBank(method) ? bank : null, method === 'cash' ? paid : total);
   }
 
   return (
@@ -470,26 +503,45 @@ function PaymentModal({
             {money(total)}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-            {itemCount} items{discountPct ? ` · ${discountPct}% discount` : ''}
+            {itemCount} item{itemCount === 1 ? '' : 's'}
+            {discountPct ? ` · ${discountPct}% discount` : ''}
           </div>
         </div>
 
         <div className="field">
           <span>Payment method</span>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {(['cash', 'card', 'mobile'] as PayMethod[]).map((x) => (
+            {PAY_METHODS.map((x) => (
               <button
-                key={x}
+                key={x.value}
                 type="button"
-                className={`chip ${method === x ? 'on' : ''}`}
+                className={`chip ${method === x.value ? 'on' : ''}`}
                 style={{ flex: 1, textAlign: 'center', padding: '9px' }}
-                onClick={() => setMethod(x)}
+                onClick={() => setMethod(x.value)}
               >
-                {titleCase(x)}
+                {x.label}
               </button>
             ))}
           </div>
         </div>
+
+        {needsBank(method) ? (
+          <div className="field">
+            <label htmlFor="pay-bank">Bank *</label>
+            <select
+              id="pay-bank"
+              className="select"
+              value={bank}
+              onChange={(e) => setBank(e.target.value as Bank)}
+            >
+              {BANKS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         {method === 'cash' ? (
           <>
@@ -535,7 +587,9 @@ function PaymentModal({
             className="tot-row"
             style={{ background: 'var(--blue-soft)', borderRadius: '10px', padding: '10px 14px' }}
           >
-            <span>{method === 'card' ? 'Card terminal' : 'Mobile wallet'} will charge</span>
+            <span>
+              {method === 'transfer' ? 'Transfer into' : 'Debit through'} {bankShort(bank)}
+            </span>
             <b>{money(total)}</b>
           </div>
         )}

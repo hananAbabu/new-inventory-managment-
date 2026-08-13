@@ -9,6 +9,7 @@ import { useToast } from '@/components/toast';
 import { Badge, EmptyState, Pager, SortTh, useSort, usePaged } from '@/components/ui';
 import { catName, stockState, supName } from '@/lib/selectors';
 import type { Product } from '@/lib/types';
+import { formatQty, formatQtyNumber, unitShort } from '@/lib/units';
 import { fdS } from '@/lib/utils';
 
 type SortField = 'sku' | 'name' | 'price' | 'qty';
@@ -170,11 +171,14 @@ export default function ProductsPage() {
                     <td className="num">{money(p.costPrice)}</td>
                     <td className="num">
                       <b>{money(p.sellPrice)}</b>
+                      <div style={{ color: 'var(--muted)', fontSize: '11px' }}>
+                        per {unitShort(p.unit)}
+                      </div>
                     </td>
                     <td className="num">
-                      <b>{p.qty}</b>{' '}
+                      <b>{formatQty(p.qty, p.unit)}</b>{' '}
                       <span style={{ color: 'var(--muted)', fontSize: '11px' }}>
-                        / min {p.minStock}
+                        / min {formatQtyNumber(p.minStock)}
                       </span>
                     </td>
                     <td>

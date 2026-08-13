@@ -6,6 +6,7 @@ import { MovementForm } from '@/components/forms/movement-form';
 import { useStore } from '@/components/store';
 import { Badge, EmptyState } from '@/components/ui';
 import { lowStock, supName } from '@/lib/selectors';
+import { formatQty, formatQtyNumber, roundQty } from '@/lib/units';
 
 export default function LowStockPage() {
   const { db } = useStore();
@@ -46,10 +47,12 @@ export default function LowStockPage() {
                   </td>
                   <td>{p.name}</td>
                   <td className="num">
-                    <b style={{ color: 'var(--danger)' }}>{p.qty}</b>
+                    <b style={{ color: 'var(--danger)' }}>{formatQty(p.qty, p.unit)}</b>
                   </td>
-                  <td className="num">{p.minStock}</td>
-                  <td className="num">{Math.max(p.minStock * 2 - p.qty, p.minStock)}</td>
+                  <td className="num">{formatQtyNumber(p.minStock)}</td>
+                  <td className="num">
+                    {formatQty(roundQty(Math.max(p.minStock * 2 - p.qty, p.minStock)), p.unit)}
+                  </td>
                   <td>{supName(db, p.supplierId)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button

@@ -36,10 +36,6 @@ export function retailValue(db: Db): number {
   return db.products.reduce((a, p) => a + p.qty * p.sellPrice, 0);
 }
 
-export function unitsOnHand(db: Db): number {
-  return db.products.reduce((a, p) => a + p.qty, 0);
-}
-
 export type BadgeTone =
   | 'b-green'
   | 'b-amber'

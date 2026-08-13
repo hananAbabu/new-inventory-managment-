@@ -77,6 +77,8 @@ input,select,textarea{font-family:inherit;font-size:13.5px;color:var(--ink)}
 .icon-btn svg{width:17px;height:17px}
 .icon-btn.sm{width:30px;height:30px;border-radius:8px}.icon-btn.sm svg{width:15px;height:15px}
 .icon-btn.danger:hover{background:var(--danger-soft);color:var(--danger);border-color:#f2c8c1}
+.icon-btn[disabled]{opacity:.4;cursor:not-allowed}
+.icon-btn[disabled]:hover{background:#fff;color:#4c5a52;border-color:var(--line)}
 .dot{position:absolute;top:-6px;right:-6px;background:var(--amber);color:#fff;font-size:10px;font-weight:800;min-width:17px;height:17px;border-radius:10px;display:grid;place-items:center;padding:0 4px;box-shadow:0 0 0 2px #fff}
 .input,.select{width:100%;border:1.5px solid #dde4dd;border-radius:10px;padding:8px 12px;background:#fff;outline:none;transition:border .15s,box-shadow .15s}
 .input:focus,.select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(14,124,91,.13)}
