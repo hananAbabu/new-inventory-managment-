@@ -2,15 +2,12 @@
 
 import { useState, type FormEvent } from 'react';
 import { Icon } from '@/components/icon';
-import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
-import { SCHEMA_SQL } from '@/lib/schema-sql';
 
 export default function SettingsPage() {
-  const { db, update, resetDemoData } = useStore();
+  const { db, update } = useStore();
   const toast = useToast();
-  const confirm = useConfirm();
   const s = db.settings;
 
   const [shopName, setShopName] = useState(s.shopName);
@@ -20,7 +17,6 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState(s.phone);
   const [address, setAddress] = useState(s.address);
   const [receiptFooter, setReceiptFooter] = useState(s.receiptFooter);
-  const [schemaOpen, setSchemaOpen] = useState(false);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,21 +44,8 @@ export default function SettingsPage() {
     toast('Settings saved');
   }
 
-  async function onReset() {
-    const ok = await confirm({
-      title: 'Reset demo data',
-      message:
-        'This wipes every change and regenerates the original demo dataset. Continue?',
-      danger: true,
-      confirm: 'Reset everything',
-    });
-    if (!ok) return;
-    resetDemoData();
-    toast('Demo data has been reset', 'info');
-  }
-
   return (
-    <div className="grid two-col">
+    <div className="grid" style={{ maxWidth: '620px' }}>
       <div className="card">
         <div className="card-h">
           <h3>Shop configuration</h3>
@@ -153,58 +136,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div>
-        <div className="card">
-          <div className="card-h">
-            <h3>Relational schema</h3>
-            <button
-              className="btn btn-ghost"
-              style={{ marginLeft: 'auto' }}
-              onClick={() => setSchemaOpen(true)}
-            >
-              <Icon name="eye" /> View SQL
-            </button>
-          </div>
-          <div className="card-b" style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
-            The demo store mirrors a normalised relational model:{' '}
-            <b>
-              users, roles, products, categories, suppliers, purchases, purchase_items, sales,
-              sale_items, payments, inventory_transactions
-            </b>{' '}
-            — with PKs, FKs and timestamps.
-          </div>
-        </div>
-
-        <div className="card" style={{ marginTop: '16px', borderColor: '#f2c8c1' }}>
-          <div className="card-h">
-            <h3 style={{ color: 'var(--danger)' }}>Danger zone</h3>
-          </div>
-          <div className="card-b">
-            <p style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '12px' }}>
-              Restore the original demo dataset. All changes you made will be lost.
-            </p>
-            <button className="btn btn-danger" onClick={onReset}>
-              <Icon name="trash" /> Reset demo data
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <Modal
-        open={schemaOpen}
-        onClose={() => setSchemaOpen(false)}
-        size="lg"
-        title="Database schema (SQL)"
-      >
-        <ModalBody>
-          <pre className="sql">{SCHEMA_SQL}</pre>
-        </ModalBody>
-        <ModalFooter>
-          <button className="btn btn-primary" onClick={() => setSchemaOpen(false)}>
-            Close
-          </button>
-        </ModalFooter>
-      </Modal>
     </div>
   );
 }

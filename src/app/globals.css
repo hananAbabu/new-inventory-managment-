@@ -209,7 +209,6 @@ input,select,textarea{font-family:inherit;font-size:13.5px;color:var(--ink)}
 .deny{max-width:440px;margin:8vh auto;text-align:center;padding:40px}
 .deny .e-ic{width:64px;height:64px;border-radius:20px;background:var(--danger-soft);color:var(--danger);display:grid;place-items:center;margin:0 auto 16px}
 .deny .e-ic svg{width:30px;height:30px}
-pre.sql{background:#0f1e18;color:#c9e8d8;border-radius:12px;padding:16px;font-size:11px;overflow:auto;max-height:380px;line-height:1.55}
 @media (max-width:1080px){.pos-wrap{grid-template-columns:1fr}.two-col{grid-template-columns:1fr}}
 @media (max-width:960px){
   .sidebar{position:fixed;left:0;top:0;transform:translateX(-105%);transition:transform .22s}

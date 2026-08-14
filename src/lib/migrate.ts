@@ -3,10 +3,12 @@ import type {
   Bank,
   Category,
   Db,
+  Expense,
   InvTx,
   PayMethod,
   Payment,
   Product,
+  ProductType,
   Purchase,
   PurchaseItem,
   Role,
@@ -30,8 +32,12 @@ type LegacyRole = Role | 'shopkeeper';
 interface LegacyUser extends Omit<User, 'role'> {
   role: LegacyRole;
 }
-interface LegacyProduct extends Omit<Product, 'unit'> {
+interface LegacyProduct
+  extends Omit<Product, 'unit' | 'productType' | 'kgPerPiece' | 'piecesPerCarton'> {
   unit?: Unit;
+  productType?: ProductType;
+  kgPerPiece?: number | null;
+  piecesPerCarton?: number | null;
 }
 interface LegacySaleItem extends Omit<SaleItem, 'unit'> {
   unit?: Unit;
@@ -68,8 +74,17 @@ export interface LegacyDb {
   sales: LegacySale[];
   purchases: LegacyPurchase[];
   payments: LegacyPayment[];
+  expenses?: Expense[];
   invTx: LegacyInvTx[];
   audit: AuditEntry[];
+}
+
+/** Products saved before the four standard configurations existed. */
+function productTypeFor(p: LegacyProduct): ProductType {
+  if (p.productType) return p.productType;
+  if (p.unit === 'kg' || p.unit === 'l') return 'weight';
+  if (p.unit === 'carton') return 'carton';
+  return 'piece';
 }
 
 function payMethod(m: LegacyPayMethod | undefined): PayMethod {
@@ -91,8 +106,15 @@ export function migrate(db: LegacyDb): Db {
     categories: db.categories,
     suppliers: db.suppliers,
     audit: db.audit,
+    expenses: db.expenses ?? [],
     users: db.users.map((u) => ({ ...u, role: role(u.role) })),
-    products: db.products.map((p) => ({ ...p, unit: p.unit ?? 'pcs' })),
+    products: db.products.map((p) => ({
+      ...p,
+      unit: p.unit ?? 'pcs',
+      productType: productTypeFor(p),
+      kgPerPiece: p.kgPerPiece ?? null,
+      piecesPerCarton: p.piecesPerCarton ?? null,
+    })),
     sales: db.sales.map((s) => ({
       ...s,
       payMethod: payMethod(s.payMethod),

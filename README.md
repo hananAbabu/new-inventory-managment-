@@ -1,4 +1,4 @@
-# Copperleaf Merch Co. — Inventory Management System
+# Inventory Management System
 
 A Next.js (App Router) + React + TypeScript port of the original single-file
 `inv.html` demo. Same design, same data model, same behaviour — split into real
@@ -59,7 +59,8 @@ src/
     selectors.ts         derived reads: money, low stock, badges, names
     navigation.ts        route table, per-role permissions, sidebar
     export.ts            sales CSV export
-    schema-sql.ts        the reference relational schema shown in Settings
+    product-types.ts     the four product configurations and their conversions
+    expenses.ts          expense categories
     utils.ts             dates, ids, refs, CSV writer
 ```
 

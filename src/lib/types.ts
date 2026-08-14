@@ -10,6 +10,13 @@ export type Bank =
   | 'shebele'
   | 'check';
 export type Unit = 'pcs' | 'kg' | 'l' | 'carton';
+
+/**
+ * How a product is stocked, priced and packed. The four configured types cover
+ * the whole catalogue; 'unset' marks a product whose packaging is still being
+ * decided and which therefore accepts any unit.
+ */
+export type ProductType = 'weight' | 'piece' | 'carton' | 'carton-piece' | 'unset';
 export type PurchaseStatus = 'ordered' | 'received';
 export type TxType =
   | 'initial'
@@ -62,7 +69,13 @@ export interface Product {
   name: string;
   categoryId: number;
   supplierId: number | null;
+  productType: ProductType;
+  /** The unit stock is counted in and prices are quoted in. */
   unit: Unit;
+  /** Weight-based only: kilograms in one sack/piece, e.g. 50. */
+  kgPerPiece: number | null;
+  /** Carton types only: retail pieces inside one carton, e.g. 4. */
+  piecesPerCarton: number | null;
   costPrice: number;
   sellPrice: number;
   qty: number;
@@ -149,6 +162,31 @@ export interface InvTx {
   note: string;
 }
 
+export type ExpenseCategory =
+  | 'rent'
+  | 'salary'
+  | 'transport'
+  | 'utilities'
+  | 'supplies'
+  | 'maintenance'
+  | 'tax'
+  | 'other';
+
+export interface Expense {
+  id: number;
+  ref: string;
+  date: number;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  payMethod: PayMethod;
+  /** Which bank the money left from — null for cash. */
+  bank: Bank | null;
+  txnRef: string | null;
+  byUserId: number;
+  createdAt: number;
+}
+
 export interface AuditEntry {
   id: number;
   date: number;
@@ -167,6 +205,7 @@ export interface Db {
   sales: Sale[];
   purchases: Purchase[];
   payments: Payment[];
+  expenses: Expense[];
   invTx: InvTx[];
   audit: AuditEntry[];
 }

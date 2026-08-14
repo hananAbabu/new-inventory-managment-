@@ -16,7 +16,9 @@ import { money as fmtMoney } from '@/lib/selectors';
 import type { Db, Session, User } from '@/lib/types';
 import { uid } from '@/lib/utils';
 
-const LS_DB = 'msims_db_v1';
+// Bumped when the catalogue was standardised on the four product configurations.
+// Anything saved under msims_db_v1 is left in place, untouched, rather than migrated.
+const LS_DB = 'msims_db_v2';
 const LS_SES = 'msims_ses_v1';
 
 export type AuditFn = (group: string, action: string, detail: string) => void;
@@ -30,7 +32,6 @@ interface StoreValue {
   update: (recipe: Recipe) => void;
   login: (username: string, password: string) => { ok: true } | { ok: false; error: string };
   logout: () => void;
-  resetDemoData: () => void;
   money: (n: number | undefined | null) => string;
 }
 
@@ -147,12 +148,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     persistSession(null);
   }, [persistSession]);
 
-  const resetDemoData = useCallback(() => {
-    const fresh = seed();
-    persist(fresh);
-    setDb(fresh);
-  }, [persist]);
-
   // A deactivated or deleted account must not keep an open session.
   useEffect(() => {
     if (db && session && !me) {
@@ -174,10 +169,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       update,
       login,
       logout,
-      resetDemoData,
       money: (n) => fmtMoney(db.settings.currency, n),
     };
-  }, [db, me, session, update, login, logout, resetDemoData]);
+  }, [db, me, session, update, login, logout]);
 
   if (!value) return <div className="boot">Loading workspace…</div>;
 

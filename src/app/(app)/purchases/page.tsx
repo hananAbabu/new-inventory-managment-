@@ -7,6 +7,7 @@ import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { Badge, EmptyState, Pager, usePaged } from '@/components/ui';
 import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
+import { describePackaging, packNoun, packSize } from '@/lib/product-types';
 import { supName } from '@/lib/selectors';
 import type { Bank, Db, PayMethod, Purchase, PurchaseItem } from '@/lib/types';
 import { formatQty, parseQty, qtyMin, qtyStep, roundQty, unitShort } from '@/lib/units';
@@ -221,7 +222,9 @@ export default function PurchasesPage() {
 
 interface DraftLine {
   productId: number;
-  qty: number;
+  /** Entered in supplier packs (sacks, cartons) — converted to stock units on save. */
+  packs: number;
+  /** Always per stock unit: per kg, per piece, per carton. */
   cost: number;
 }
 
@@ -234,29 +237,49 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
   const [bank, setBank] = useState<Bank>(purchase?.bank ?? 'cbe');
   const [pick, setPick] = useState(db.products[0]?.id ?? 0);
   const [lines, setLines] = useState<DraftLine[]>(
-    purchase ? purchase.items.map((i) => ({ productId: i.productId, qty: i.qty, cost: i.cost })) : [],
+    purchase
+      ? purchase.items.map((i) => {
+          const p = db.products.find((x) => x.id === i.productId);
+          const size = p ? packSize(p) : 1;
+          return { productId: i.productId, packs: roundQty(i.qty / size), cost: i.cost };
+        })
+      : [],
   );
 
-  const orderTotal = lines.reduce((a, l) => a + l.qty * l.cost, 0);
+  const productOf = (id: number) => db.products.find((x) => x.id === id);
+  /** Stock units a line brings in: packs × pack size. */
+  const stockQty = (l: DraftLine): number => {
+    const p = productOf(l.productId);
+    return roundQty(l.packs * (p ? packSize(p) : 1));
+  };
+
+  const orderTotal = lines.reduce((a, l) => a + stockQty(l) * l.cost, 0);
 
   function addLine() {
-    const p = db.products.find((x) => x.id === Number(pick));
+    const p = productOf(Number(pick));
     if (!p) return;
     if (lines.some((l) => l.productId === p.id)) {
       toast('Product already in this order', 'error');
       return;
     }
-    setLines((prev) => [...prev, { productId: p.id, qty: 10, cost: p.costPrice }]);
+    setLines((prev) => [...prev, { productId: p.id, packs: 10, cost: p.costPrice }]);
   }
 
-  function editLine(i: number, key: 'qty' | 'cost', value: string) {
+  function editLine(i: number, key: 'packs' | 'cost', value: string) {
     setLines((prev) =>
       prev.map((l, idx) => {
         if (idx !== i) return l;
         if (key === 'cost') return { ...l, cost: Math.max(0, parseFloat(value) || 0) };
-        const unit = db.products.find((x) => x.id === l.productId)?.unit ?? 'pcs';
+        const p = productOf(l.productId);
+        const size = p ? packSize(p) : 1;
+        // Packs are whole sacks or cartons; only loose stock units can be fractional.
+        if (size > 1) {
+          const n = parseInt(value, 10);
+          return { ...l, packs: Math.max(1, isNaN(n) ? 1 : n) };
+        }
+        const unit = p?.unit ?? 'pcs';
         const parsed = parseQty(value, unit);
-        return { ...l, qty: Math.max(qtyMin(unit), isNaN(parsed) ? qtyMin(unit) : parsed) };
+        return { ...l, packs: Math.max(qtyMin(unit), isNaN(parsed) ? qtyMin(unit) : parsed) };
       }),
     );
   }
@@ -268,7 +291,14 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
     }
     const items: PurchaseItem[] = lines.map((l) => {
       const p = db.products.find((x) => x.id === l.productId)!;
-      return { productId: l.productId, sku: p.sku, name: p.name, unit: p.unit, qty: l.qty, cost: l.cost };
+      return {
+        productId: l.productId,
+        sku: p.sku,
+        name: p.name,
+        unit: p.unit,
+        qty: stockQty(l),
+        cost: l.cost,
+      };
     });
     const total = items.reduce((a, b) => a + b.qty * b.cost, 0);
     const now = Date.now();
@@ -398,7 +428,7 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
             >
               {db.products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.sku} — {p.name} ({unitShort(p.unit)})
+                  {p.sku} — {p.name} ({describePackaging(p)})
                 </option>
               ))}
             </select>
@@ -413,8 +443,8 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
             <thead>
               <tr>
                 <th>Product</th>
-                <th style={{ width: '110px' }}>Qty</th>
-                <th style={{ width: '120px' }}>Unit cost</th>
+                <th style={{ width: '130px' }}>Quantity</th>
+                <th style={{ width: '130px' }}>Unit cost</th>
                 <th className="num">Line total</th>
                 <th />
               </tr>
@@ -422,26 +452,37 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
             <tbody>
               {lines.map((l, i) => {
                 const p = db.products.find((x) => x.id === l.productId)!;
+                const size = packSize(p);
+                const noun = packNoun(p);
+                const stock = stockQty(l);
                 return (
                   <tr key={l.productId}>
                     <td>
                       <b>{p.sku}</b> {p.name}
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        {describePackaging(p)}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <input
                           className="input"
                           type="number"
-                          min={qtyMin(p.unit)}
-                          step={qtyStep(p.unit)}
-                          value={l.qty}
-                          onChange={(e) => editLine(i, 'qty', e.target.value)}
-                          aria-label={`Quantity for ${p.sku} in ${unitShort(p.unit)}`}
+                          min={size > 1 ? 1 : qtyMin(p.unit)}
+                          step={size > 1 ? 1 : qtyStep(p.unit)}
+                          value={l.packs}
+                          onChange={(e) => editLine(i, 'packs', e.target.value)}
+                          aria-label={`Quantity for ${p.sku} in ${noun ?? unitShort(p.unit)}`}
                         />
                         <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                          {unitShort(p.unit)}
+                          {noun ?? unitShort(p.unit)}
                         </span>
                       </div>
+                      {size > 1 ? (
+                        <div style={{ fontSize: '11px', color: 'var(--brand)', marginTop: '3px' }}>
+                          = {formatQty(stock, p.unit)}
+                        </div>
+                      ) : null}
                     </td>
                     <td>
                       <input
@@ -451,11 +492,14 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
                         min="0"
                         value={l.cost}
                         onChange={(e) => editLine(i, 'cost', e.target.value)}
-                        aria-label={`Unit cost for ${p.sku}`}
+                        aria-label={`Cost per ${unitShort(p.unit)} for ${p.sku}`}
                       />
+                      <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '3px' }}>
+                        per {unitShort(p.unit)}
+                      </div>
                     </td>
                     <td className="num">
-                      <b>{money(l.qty * l.cost)}</b>
+                      <b>{money(stock * l.cost)}</b>
                     </td>
                     <td>
                       <button

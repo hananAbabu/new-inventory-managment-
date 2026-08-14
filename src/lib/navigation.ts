@@ -16,6 +16,7 @@ export const PAGES: PageDef[] = [
   { path: '/inventory', title: 'Inventory', roles: ['admin', 'storekeeper'] },
   { path: '/low-stock', title: 'Low Stock Monitor', roles: ['admin', 'storekeeper'] },
   { path: '/sales', title: 'Sales History', roles: ['admin'] },
+  { path: '/expenses', title: 'Expenses', roles: ['admin'] },
   { path: '/my-sales', title: 'My Sales', roles: ['cashier'] },
   { path: '/suppliers', title: 'Suppliers', roles: ['admin', 'storekeeper'] },
   { path: '/purchases', title: 'Purchases', roles: ['admin', 'storekeeper'] },
@@ -72,9 +73,10 @@ export function navFor(role: Role): NavGroup[] {
         ],
       },
       {
-        group: 'Sales',
+        group: 'Money',
         items: [
           { path: '/sales', label: 'Sales History', icon: 'receipt' },
+          { path: '/expenses', label: 'Expenses', icon: 'tag' },
           { path: '/reports', label: 'Reports', icon: 'chart' },
         ],
       },

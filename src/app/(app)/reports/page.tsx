@@ -278,27 +278,34 @@ function BanksReport({ from }: { from: number }) {
     const purchases = db.purchases.filter(
       (p) => p.createdAt >= from && p.bank && p.status === 'received',
     );
+    const expenses = db.expenses.filter((e) => e.date >= from && e.bank);
 
     return BANKS.map((b) => {
       const inSales = sales.filter((s) => s.bank === b.value);
       const outPurchases = purchases.filter((p) => p.bank === b.value);
+      const outExpenses = expenses.filter((e) => e.bank === b.value);
       const inAmt = inSales.reduce((a, s) => a + s.total, 0);
-      const outAmt = outPurchases.reduce((a, p) => a + p.total, 0);
+      const purchaseAmt = outPurchases.reduce((a, p) => a + p.total, 0);
+      const expenseAmt = outExpenses.reduce((a, e) => a + e.amount, 0);
       return {
         bank: b,
         salesCount: inSales.length,
         inAmt,
         purchaseCount: outPurchases.length,
-        outAmt,
-        net: inAmt - outAmt,
+        purchaseAmt,
+        expenseCount: outExpenses.length,
+        expenseAmt,
+        outAmt: purchaseAmt + expenseAmt,
+        net: inAmt - purchaseAmt - expenseAmt,
       };
-    }).filter((r) => r.salesCount || r.purchaseCount);
-  }, [db.sales, db.purchases, from]);
+    }).filter((r) => r.salesCount || r.purchaseCount || r.expenseCount);
+  }, [db.sales, db.purchases, db.expenses, from]);
 
   const cashSales = db.sales.filter((s) => s.createdAt >= from && !s.bank);
   const cashPurchases = db.purchases.filter(
     (p) => p.createdAt >= from && !p.bank && p.status === 'received',
   );
+  const cashExpenses = db.expenses.filter((e) => e.date >= from && !e.bank);
   const totalIn = rows.reduce((a, r) => a + r.inAmt, 0);
   const totalOut = rows.reduce((a, r) => a + r.outAmt, 0);
 
@@ -311,8 +318,11 @@ function BanksReport({ from }: { from: number }) {
           { label: 'Net through banks', value: money(totalIn - totalOut), accent: true },
           { label: 'Cash sales', value: money(cashSales.reduce((a, s) => a + s.total, 0)) },
           {
-            label: 'Cash purchases',
-            value: money(cashPurchases.reduce((a, p) => a + p.total, 0)),
+            label: 'Cash out',
+            value: money(
+              cashPurchases.reduce((a, p) => a + p.total, 0) +
+                cashExpenses.reduce((a, e) => a + e.amount, 0),
+            ),
           },
         ]}
       />
@@ -336,8 +346,15 @@ function BanksReport({ from }: { from: number }) {
                     },
                     {
                       label: 'Paid (purchases)',
-                      data: rows.map((r) => +r.outAmt.toFixed(2)),
+                      data: rows.map((r) => +r.purchaseAmt.toFixed(2)),
                       backgroundColor: '#e89b18',
+                      borderRadius: 6,
+                      maxBarThickness: 34,
+                    },
+                    {
+                      label: 'Paid (expenses)',
+                      data: rows.map((r) => +r.expenseAmt.toFixed(2)),
+                      backgroundColor: '#cf4433',
                       borderRadius: 6,
                       maxBarThickness: 34,
                     },
@@ -359,6 +376,7 @@ function BanksReport({ from }: { from: number }) {
                   <th className="num">Sales</th>
                   <th className="num">Received</th>
                   <th className="num">Purchases</th>
+                  <th className="num">Expenses</th>
                   <th className="num">Paid out</th>
                   <th className="num">Net</th>
                 </tr>
@@ -374,7 +392,8 @@ function BanksReport({ from }: { from: number }) {
                     <td className="num">
                       <b style={{ color: 'var(--brand)' }}>{money(r.inAmt)}</b>
                     </td>
-                    <td className="num">{r.purchaseCount}</td>
+                    <td className="num">{money(r.purchaseAmt)}</td>
+                    <td className="num">{money(r.expenseAmt)}</td>
                     <td className="num">
                       <b style={{ color: 'var(--amber)' }}>{money(r.outAmt)}</b>
                     </td>
@@ -396,7 +415,10 @@ function BanksReport({ from }: { from: number }) {
                     <b>{money(totalIn)}</b>
                   </td>
                   <td className="num">
-                    <b>{rows.reduce((a, r) => a + r.purchaseCount, 0)}</b>
+                    <b>{money(rows.reduce((a, r) => a + r.purchaseAmt, 0))}</b>
+                  </td>
+                  <td className="num">
+                    <b>{money(rows.reduce((a, r) => a + r.expenseAmt, 0))}</b>
                   </td>
                   <td className="num">
                     <b>{money(totalOut)}</b>
@@ -756,7 +778,9 @@ function ProfitReport({ from }: { from: number }) {
   const rev = list.reduce((a, s) => a + s.total, 0);
   const cogs = list.reduce((a, s) => a + s.items.reduce((x, i) => x + i.cost * i.qty, 0), 0);
   const disc = list.reduce((a, s) => a + s.discount, 0);
-  const profit = rev - cogs - disc;
+  const gross = rev - cogs - disc;
+  const expenses = db.expenses.filter((e) => e.date >= from).reduce((a, e) => a + e.amount, 0);
+  const net = gross - expenses;
   const days = last14Days();
 
   return (
@@ -766,8 +790,10 @@ function ProfitReport({ from }: { from: number }) {
           { label: 'Revenue', value: money(rev) },
           { label: 'Cost of goods', value: money(cogs) },
           { label: 'Discounts', value: money(disc) },
-          { label: 'Gross profit', value: money(profit), accent: true },
-          { label: 'Margin', value: `${rev ? Math.round((profit / rev) * 100) : 0}%` },
+          { label: 'Gross profit', value: money(gross) },
+          { label: 'Expenses', value: money(expenses) },
+          { label: 'Net profit', value: money(net), accent: true },
+          { label: 'Margin', value: `${rev ? Math.round((net / rev) * 100) : 0}%` },
         ]}
       />
       <div className="card-b">

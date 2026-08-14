@@ -5,7 +5,14 @@ import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
-import type { Product, Unit } from '@/lib/types';
+import {
+  PRODUCT_TYPES,
+  needsKgPerPiece,
+  needsPiecesPerCarton,
+  stockUnitFor,
+  typeDef,
+} from '@/lib/product-types';
+import type { Product, ProductType, Unit } from '@/lib/types';
 import { UNITS, formatQty, parseQty, qtyStep, unitShort } from '@/lib/units';
 import { uid } from '@/lib/utils';
 
@@ -23,11 +30,22 @@ export function ProductForm({ open, product, onClose }: Props) {
   const [name, setName] = useState(product?.name ?? '');
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? db.categories[0]?.id ?? 0);
   const [supplierId, setSupplierId] = useState(product?.supplierId ?? 0);
-  const [unit, setUnit] = useState<Unit>(product?.unit ?? 'pcs');
+  const [productType, setProductType] = useState<ProductType>(product?.productType ?? 'piece');
+  const [freeUnit, setFreeUnit] = useState<Unit>(product?.unit ?? 'pcs');
+  const [kgPerPiece, setKgPerPiece] = useState(
+    product?.kgPerPiece != null ? String(product.kgPerPiece) : '',
+  );
+  const [piecesPerCarton, setPiecesPerCarton] = useState(
+    product?.piecesPerCarton != null ? String(product.piecesPerCarton) : '',
+  );
   const [cost, setCost] = useState(product ? String(product.costPrice) : '');
   const [price, setPrice] = useState(product ? String(product.sellPrice) : '');
   const [qty, setQty] = useState('0');
   const [minStock, setMinStock] = useState(String(product?.minStock ?? 5));
+
+  // A configured type fixes the stock and price unit; 'unset' lets it be chosen.
+  const unit: Unit = stockUnitFor(productType) ?? freeUnit;
+  const def = typeDef(productType);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -49,6 +67,23 @@ export function ProductForm({ open, product, onClose }: Props) {
       return;
     }
 
+    // Packaging numbers only apply to the types that define them.
+    const kgV = needsKgPerPiece(productType) ? parseFloat(kgPerPiece) : NaN;
+    if (needsKgPerPiece(productType) && !(kgV > 0)) {
+      toast('Enter how many kilograms are in one sack', 'error');
+      return;
+    }
+    const pcsV = needsPiecesPerCarton(productType) ? parseInt(piecesPerCarton, 10) : NaN;
+    if (productType === 'carton-piece' && !(pcsV > 0)) {
+      toast('Enter how many pieces are in one carton', 'error');
+      return;
+    }
+
+    const packaging = {
+      kgPerPiece: needsKgPerPiece(productType) && kgV > 0 ? kgV : null,
+      piecesPerCarton: needsPiecesPerCarton(productType) && pcsV > 0 ? pcsV : null,
+    };
+
     const now = Date.now();
     const supId = Number(supplierId) || null;
 
@@ -61,7 +96,9 @@ export function ProductForm({ open, product, onClose }: Props) {
           name: nameV,
           categoryId: Number(categoryId),
           supplierId: supId,
+          productType,
           unit,
+          ...packaging,
           costPrice: costV,
           sellPrice: priceV,
           minStock: minV,
@@ -80,7 +117,9 @@ export function ProductForm({ open, product, onClose }: Props) {
           name: nameV,
           categoryId: Number(categoryId),
           supplierId: supId,
+          productType,
           unit,
+          ...packaging,
           costPrice: costV,
           sellPrice: priceV,
           qty: startQty,
@@ -175,23 +214,90 @@ export function ProductForm({ open, product, onClose }: Props) {
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label htmlFor="pf-unit">Unit of measure *</label>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label htmlFor="pf-type">Product configuration *</label>
               <select
-                id="pf-unit"
+                id="pf-type"
                 className="select"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value as Unit)}
+                value={productType}
+                onChange={(e) => setProductType(e.target.value as ProductType)}
                 required
               >
-                {UNITS.map((u) => (
-                  <option key={u.value} value={u.value}>
-                    {u.label}
+                {PRODUCT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </select>
-              <span className="hint">Kilogram and litre accept fractions; pieces and cartons do not.</span>
+              <span className="hint">
+                {def.hint}
+                {def.stockUnit ? ` Stock and prices are in ${unitShort(def.stockUnit)}.` : ''}
+              </span>
             </div>
+
+            {productType === 'unset' ? (
+              <div className="field">
+                <label htmlFor="pf-unit">Unit of measure *</label>
+                <select
+                  id="pf-unit"
+                  className="select"
+                  value={freeUnit}
+                  onChange={(e) => setFreeUnit(e.target.value as Unit)}
+                  required
+                >
+                  {UNITS.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">
+                  Kilogram and litre accept fractions; pieces and cartons do not.
+                </span>
+              </div>
+            ) : null}
+
+            {needsKgPerPiece(productType) ? (
+              <div className="field">
+                <label htmlFor="pf-kg">Kilograms per sack *</label>
+                <input
+                  id="pf-kg"
+                  className="input"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={kgPerPiece}
+                  onChange={(e) => setKgPerPiece(e.target.value)}
+                  placeholder="e.g. 50"
+                  required
+                />
+                <span className="hint">Purchases are entered in sacks and converted to kg.</span>
+              </div>
+            ) : null}
+
+            {needsPiecesPerCarton(productType) ? (
+              <div className="field">
+                <label htmlFor="pf-pcs">
+                  Pieces per carton {productType === 'carton-piece' ? '*' : ''}
+                </label>
+                <input
+                  id="pf-pcs"
+                  className="input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={piecesPerCarton}
+                  onChange={(e) => setPiecesPerCarton(e.target.value)}
+                  placeholder="e.g. 4"
+                  required={productType === 'carton-piece'}
+                />
+                <span className="hint">
+                  {productType === 'carton-piece'
+                    ? 'Purchases are entered in cartons and converted to pieces.'
+                    : 'Recorded for reference — stock and prices stay per carton.'}
+                </span>
+              </div>
+            ) : null}
             <div className="field">
               <label htmlFor="pf-cost">Purchase price (cost) — per {unitShort(unit)} *</label>
               <input

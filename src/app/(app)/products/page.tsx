@@ -7,6 +7,7 @@ import { useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { Badge, EmptyState, Pager, SortTh, useSort, usePaged } from '@/components/ui';
+import { describePackaging, typeLabel } from '@/lib/product-types';
 import { catName, stockState, supName } from '@/lib/selectors';
 import type { Product } from '@/lib/types';
 import { formatQty, formatQtyNumber, unitShort } from '@/lib/units';
@@ -143,6 +144,7 @@ export default function ProductsPage() {
             <tr>
               <SortTh field="sku" label="SKU" sort={sort} dir={dir} onSort={toggle} />
               <SortTh field="name" label="Product" sort={sort} dir={dir} onSort={toggle} />
+              <th>Configuration</th>
               <th>Supplier</th>
               <th className="num">Cost</th>
               <SortTh field="price" label="Price" sort={sort} dir={dir} onSort={toggle} className="num" />
@@ -166,6 +168,18 @@ export default function ProductsPage() {
                       <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                         {catName(db, p.categoryId)}
                       </div>
+                    </td>
+                    <td>
+                      {p.productType === 'unset' ? (
+                        <Badge tone="b-amber">Not configured</Badge>
+                      ) : (
+                        <>
+                          {typeLabel(p.productType)}
+                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                            {describePackaging(p)}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td>{supName(db, p.supplierId)}</td>
                     <td className="num">{money(p.costPrice)}</td>
@@ -198,7 +212,7 @@ export default function ProductsPage() {
               })
             ) : (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <EmptyState
                     icon="tag"
                     title="No products match"
