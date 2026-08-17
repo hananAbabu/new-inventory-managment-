@@ -5,7 +5,7 @@ import { requireUser } from '@/server/auth';
 import { schema } from '@/server/db';
 import { AppError, mutate } from '@/server/mutate';
 import { num, quantity, writeAudit } from '@/server/workspace';
-import type { TxType } from '@/lib/types';
+import type { StockLocation, TxType } from '@/lib/types';
 import { formatQty, roundQty } from '@/lib/units';
 import type { ActionResult } from './shared';
 
@@ -15,6 +15,7 @@ export async function recordMovement(input: {
   productId: number;
   type: MovementType;
   qty: number;
+  location?: StockLocation;
   note: string;
 }): Promise<ActionResult> {
   return mutate(async (tx) => {
@@ -37,14 +38,23 @@ export async function recordMovement(input: {
 
     const delta =
       input.type === 'received' || input.type === 'adjustment' ? input.qty : -input.qty;
-    const after = roundQty(num(p.qty) + delta);
+    // A movement affects one location, so it is that location's count that must cover it.
+    const location = input.location ?? 'store';
+    const held = location === 'shop' ? num(p.qtyShop) : num(p.qtyStore);
+    const after = roundQty(held + delta);
     if (after < 0) {
-      throw new AppError(`Insufficient stock — only ${formatQty(num(p.qty), p.unit)} on hand`);
+      throw new AppError(
+        `Insufficient ${location} stock — only ${formatQty(held, p.unit)} on hand`,
+      );
     }
 
     await tx
       .update(schema.products)
-      .set({ qty: quantity(after), updatedAt: new Date() })
+      .set(
+        location === 'shop'
+          ? { qtyShop: quantity(after), updatedAt: new Date() }
+          : { qtyStore: quantity(after), updatedAt: new Date() },
+      )
       .where(eq(schema.products.id, p.id));
 
     await tx.insert(schema.inventoryTransactions).values({
@@ -54,6 +64,7 @@ export async function recordMovement(input: {
       unit: p.unit,
       type: input.type,
       qty: quantity(delta),
+      location,
       userId: user.id,
       note: input.note.trim(),
     });

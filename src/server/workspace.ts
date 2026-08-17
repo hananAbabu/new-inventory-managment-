@@ -3,6 +3,7 @@ import { db, schema } from './db';
 import type { Tx } from './mutate';
 import type {
   AuditEntry,
+  Customer,
   Category,
   Db,
   Expense,
@@ -44,6 +45,7 @@ export async function loadWorkspace(): Promise<Db> {
     userRows,
     categoryRows,
     supplierRows,
+    customerRows,
     productRows,
     saleRows,
     saleItemRows,
@@ -58,6 +60,7 @@ export async function loadWorkspace(): Promise<Db> {
     db.select().from(schema.users).orderBy(asc(schema.users.id)),
     db.select().from(schema.categories).orderBy(asc(schema.categories.id)),
     db.select().from(schema.suppliers).orderBy(asc(schema.suppliers.id)),
+    db.select().from(schema.customers).orderBy(asc(schema.customers.name)),
     db.select().from(schema.products).orderBy(asc(schema.products.id)),
     db.select().from(schema.sales).orderBy(asc(schema.sales.id)),
     db.select().from(schema.saleItems).orderBy(asc(schema.saleItems.id)),
@@ -107,6 +110,15 @@ export async function loadWorkspace(): Promise<Db> {
     createdAt: ms(x.createdAt),
   }));
 
+  const customers: Customer[] = customerRows.map((x) => ({
+    id: x.id,
+    name: x.name,
+    phone: x.phone,
+    address: x.address,
+    note: x.note,
+    createdAt: ms(x.createdAt),
+  }));
+
   const products: Product[] = productRows.map((p) => ({
     id: p.id,
     sku: p.sku,
@@ -119,6 +131,8 @@ export async function loadWorkspace(): Promise<Db> {
     piecesPerCarton: p.piecesPerCarton,
     costPrice: num(p.costPrice),
     sellPrice: num(p.sellPrice),
+    qtyStore: num(p.qtyStore),
+    qtyShop: num(p.qtyShop),
     qty: num(p.qty),
     minStock: num(p.minStock),
     createdAt: ms(p.createdAt),
@@ -152,6 +166,9 @@ export async function loadWorkspace(): Promise<Db> {
     total: num(x.total),
     payMethod: x.payMethod,
     bank: x.bank,
+    customerId: x.customerId,
+    location: x.location,
+    paymentStatus: x.paymentStatus,
     txnRef: x.txnRef,
     txnPhoto: x.txnPhoto,
     amountPaid: num(x.amountPaid),
@@ -183,16 +200,25 @@ export async function loadWorkspace(): Promise<Db> {
     status: x.status,
     payMethod: x.payMethod,
     bank: x.bank,
+    amountPaid: num(x.amountPaid),
+    paymentStatus: x.paymentStatus,
+    location: x.location,
     createdAt: ms(x.createdAt),
     receivedAt: msOrNull(x.receivedAt),
   }));
 
   const payments: Payment[] = paymentRows.map((x) => ({
     id: x.id,
+    party: x.party,
     saleId: x.saleId,
+    purchaseId: x.purchaseId,
     method: x.method,
     bank: x.bank,
     amount: num(x.amount),
+    txnRef: x.txnRef,
+    note: x.note,
+    paidAt: ms(x.paidAt),
+    takenByUserId: x.takenByUserId,
     createdAt: ms(x.createdAt),
   }));
 
@@ -237,6 +263,7 @@ export async function loadWorkspace(): Promise<Db> {
     users,
     categories,
     suppliers,
+    customers,
     products,
     sales,
     purchases,

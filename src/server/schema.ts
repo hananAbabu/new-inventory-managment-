@@ -1,5 +1,7 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   integer,
   numeric,
@@ -14,7 +16,13 @@ import {
 /* ---------------- enums ---------------- */
 
 export const roleEnum = pgEnum('role', ['admin', 'storekeeper', 'cashier']);
-export const payMethodEnum = pgEnum('pay_method', ['cash', 'transfer', 'debit']);
+export const payMethodEnum = pgEnum('pay_method', ['cash', 'transfer', 'credit']);
+/** Where stock sits: the back store or the shop counter. */
+export const stockLocationEnum = pgEnum('stock_location', ['store', 'shop']);
+/** How much of an invoice has actually been settled. */
+export const paymentStatusEnum = pgEnum('payment_status', ['paid', 'partial', 'pending']);
+/** A payment belongs to a sale or a purchase, never both. */
+export const paymentPartyEnum = pgEnum('payment_party', ['sale', 'purchase']);
 export const bankEnum = pgEnum('bank', [
   'cbe',
   'boa',
@@ -124,6 +132,19 @@ export const suppliers = pgTable('suppliers', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const customers = pgTable(
+  'customers',
+  {
+    id: serial('id').primaryKey(),
+    name: text('name').notNull(),
+    phone: text('phone').notNull().default(''),
+    address: text('address').notNull().default(''),
+    note: text('note').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('customers_name_key').on(t.name)],
+);
+
 export const products = pgTable(
   'products',
   {
@@ -142,7 +163,12 @@ export const products = pgTable(
     piecesPerCarton: integer('pieces_per_carton'),
     costPrice: money('cost_price').notNull(),
     sellPrice: money('sell_price').notNull(),
-    qty: qty('qty').notNull().default('0'),
+    /** Warehouse stock. */
+    qtyStore: qty('qty_store').notNull().default('0'),
+    /** Counter stock. */
+    qtyShop: qty('qty_shop').notNull().default('0'),
+    /** Store + shop. Generated, so the total can never drift from its parts. */
+    qty: qty('qty').generatedAlwaysAs(sql`qty_store + qty_shop`),
     minStock: qty('min_stock').notNull().default('0'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -168,7 +194,11 @@ export const sales = pgTable(
     txnRef: text('txn_ref'),
     /** Compressed transfer slip, stored as a data URL. */
     txnPhoto: text('txn_photo'),
+    /** Required once anything is left owing — somebody has to be on the hook for it. */
+    customerId: integer('customer_id').references(() => customers.id, { onDelete: 'restrict' }),
+    location: stockLocationEnum('location').notNull().default('shop'),
     amountPaid: money('amount_paid').notNull(),
+    paymentStatus: paymentStatusEnum('payment_status').notNull().default('paid'),
     change: money('change_due').notNull().default('0'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -210,6 +240,9 @@ export const purchases = pgTable(
     status: purchaseStatusEnum('status').notNull().default('ordered'),
     payMethod: payMethodEnum('pay_method').notNull().default('cash'),
     bank: bankEnum('bank'),
+    amountPaid: money('amount_paid').notNull().default('0'),
+    paymentStatus: paymentStatusEnum('payment_status').notNull().default('paid'),
+    location: stockLocationEnum('location').notNull().default('store'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     receivedAt: timestamp('received_at', { withTimezone: true }),
   },
@@ -235,19 +268,37 @@ export const purchaseItems = pgTable(
   (t) => [index('purchase_items_purchase_idx').on(t.purchaseId)],
 );
 
+/**
+ * One instalment against a sale or a purchase. The amount_paid and payment_status
+ * columns on those tables are caches recomputed from these rows, so "100 now, 100
+ * next week" is kept as two dated payments rather than a single overwritten number.
+ */
 export const payments = pgTable(
   'payments',
   {
     id: serial('id').primaryKey(),
-    saleId: integer('sale_id')
-      .notNull()
-      .references(() => sales.id, { onDelete: 'cascade' }),
+    party: paymentPartyEnum('party').notNull().default('sale'),
+    saleId: integer('sale_id').references(() => sales.id, { onDelete: 'cascade' }),
+    purchaseId: integer('purchase_id').references(() => purchases.id, { onDelete: 'cascade' }),
     method: payMethodEnum('method').notNull(),
     bank: bankEnum('bank'),
     amount: money('amount').notNull(),
+    txnRef: text('txn_ref'),
+    note: text('note').notNull().default(''),
+    paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+    takenByUserId: integer('taken_by_user_id').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('payments_sale_idx').on(t.saleId)],
+  (t) => [
+    index('payments_sale_idx').on(t.saleId),
+    index('payments_purchase_idx').on(t.purchaseId),
+    check(
+      'payments_one_party',
+      sql`(party = 'sale' AND sale_id IS NOT NULL AND purchase_id IS NULL)
+       OR (party = 'purchase' AND purchase_id IS NOT NULL AND sale_id IS NULL)`,
+    ),
+    check('payments_amount_positive', sql`amount > 0`),
+  ],
 );
 
 export const expenses = pgTable(
@@ -282,6 +333,8 @@ export const inventoryTransactions = pgTable(
     name: text('name').notNull(),
     unit: unitEnum('unit').notNull(),
     type: txTypeEnum('type').notNull(),
+    /** Which stock this movement touched. */
+    location: stockLocationEnum('location').notNull().default('store'),
     /** Signed: positive in, negative out. */
     qty: qty('qty').notNull(),
     userId: integer('user_id')

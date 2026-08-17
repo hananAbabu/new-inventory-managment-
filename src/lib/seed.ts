@@ -84,7 +84,7 @@ const PURCHASES: PurchaseSeed[] = [
   [31, 3, [[3, 30, 95], [4, 20, 88], [5, 50, 78]], 'transfer', 'awash'],
   [24, 2, [[7, 60, 3200], [8, 40, 2850]], 'transfer', 'coop'],
   [17, 4, [[9, 85, 1150], [10, 12, 2400]], 'cash', null],
-  [10, 2, [[11, 24, 810], [12, 18, 845]], 'debit', 'boa'],
+  [10, 2, [[11, 24, 810], [12, 18, 845]], 'credit', null],
   [4, 3, [[2, 30, 48], [13, 60, 72]], 'transfer', 'check'],
 ];
 
@@ -92,7 +92,7 @@ const EXPENSES: ExpenseSeed[] = [
   [28, 'rent', 'Store rent — monthly', 12000, 'transfer', 'cbe'],
   [26, 'salary', 'Staff salaries', 15000, 'transfer', 'cbe'],
   [21, 'transport', 'Freight from Merkato warehouse', 3600, 'cash', null],
-  [18, 'utilities', 'Electricity and water', 1450, 'debit', 'awash'],
+  [18, 'utilities', 'Electricity and water', 1450, 'transfer', 'awash'],
   [12, 'supplies', 'Sacks, tape and packing material', 980, 'cash', null],
   [9, 'transport', 'Delivery fuel', 2200, 'cash', null],
   [5, 'maintenance', 'Weighing scale service', 1750, 'transfer', 'boa'],
@@ -134,6 +134,11 @@ export function seed(): Db {
       { id: 5, name: 'Edible Oils', description: 'Cooking oil in jerrycans and cartons' },
       { id: 6, name: 'Dates & Dried Fruit', description: 'Dates and dried produce' },
     ],
+    customers: [
+      { id: 1, name: 'Abebe Kebede', phone: '+251 911 445 210', address: 'Merkato, Addis Ababa', note: 'Buys sugar and oil weekly', createdAt: now - 70 * DAY },
+      { id: 2, name: 'Tsehay Retail', phone: '+251 911 782 330', address: 'Piassa', note: 'Shop owner, settles fortnightly', createdAt: now - 58 * DAY },
+      { id: 3, name: 'Genet Hailu', phone: '+251 911 220 118', address: 'Kolfe', note: '', createdAt: now - 40 * DAY },
+    ],
     suppliers: [
       { id: 1, name: 'Renuka Distribution PLC', contact: 'Selam Bekele', phone: '+251 911 224 466', email: 'orders@renukadist.et', address: 'Kality Industrial Area', createdAt: now - 88 * DAY },
       { id: 2, name: 'Chife Oil Import & Trading', contact: 'Yonas Girma', phone: '+251 911 553 210', email: 'sales@chifeoil.et', address: 'Lebu Warehouse 12', createdAt: now - 76 * DAY },
@@ -164,6 +169,8 @@ export function seed(): Db {
       piecesPerCarton: p[7],
       costPrice: p[8],
       sellPrice: p[9],
+      qtyStore: roundQty(p[10] * 0.7),
+      qtyShop: roundQty(p[10] - roundQty(p[10] * 0.7)),
       qty: p[10],
       minStock: p[11],
       createdAt: now - 60 * DAY,
@@ -209,6 +216,9 @@ export function seed(): Db {
       status: 'received' as const,
       payMethod: pp[3],
       bank: pp[4],
+      amountPaid: pp[3] === 'credit' ? 0 : total,
+      paymentStatus: pp[3] === 'credit' ? ('pending' as const) : ('paid' as const),
+      location: 'store' as const,
       createdAt: dt,
       receivedAt: dt + 3_600_000,
     };
@@ -250,6 +260,9 @@ export function seed(): Db {
     status: 'ordered',
     payMethod: 'transfer',
     bank: 'dashen',
+    amountPaid: 0,
+    paymentStatus: 'pending',
+    location: 'store',
     createdAt: now - 2 * DAY,
     receivedAt: null,
   });
@@ -299,15 +312,24 @@ export function seed(): Db {
       const discountPct = R() < 0.25 ? (R() < 0.5 ? 5 : 10) : 0;
       const discount = (subtotal * discountPct) / 100;
       const total = subtotal - discount;
-      const method: PayMethod = R() < 0.5 ? 'cash' : R() < 0.7 ? 'transfer' : 'debit';
+      const method: PayMethod = R() < 0.5 ? 'cash' : R() < 0.75 ? 'transfer' : 'credit';
+      // Only a transfer clears through a bank.
       const bank: Bank | null =
-        method === 'cash' ? null : BANK_VALUES[Math.floor(R() * BANK_VALUES.length)];
+        method === 'transfer' ? BANK_VALUES[Math.floor(R() * BANK_VALUES.length)] : null;
+      // Credit goes out unpaid, or sometimes part-paid on the day.
       const paid =
-        method === 'cash'
-          ? R() < 0.5
-            ? Math.ceil(total / 5) * 5
-            : Math.ceil(total)
-          : total;
+        method === 'credit'
+          ? R() < 0.4
+            ? Math.round(total * 0.5)
+            : 0
+          : method === 'cash'
+            ? R() < 0.5
+              ? Math.ceil(total / 5) * 5
+              : Math.ceil(total)
+            : total;
+      // Anything left owing must name the customer who owes it.
+      const customerId =
+        method === 'credit' || paid + 0.001 < total ? 1 + Math.floor(R() * 3) : null;
       const sale = {
         id: saleN,
         ref: 'S-' + String(saleN).padStart(5, '0'),
@@ -320,6 +342,14 @@ export function seed(): Db {
         total,
         payMethod: method,
         bank,
+        customerId,
+        location: 'shop' as const,
+        paymentStatus:
+          paid <= 0
+            ? ('pending' as const)
+            : paid + 0.001 < total
+              ? ('partial' as const)
+              : ('paid' as const),
         txnRef: bank ? 'FT' + String(Math.floor(R() * 9_000_000) + 1_000_000) : null,
         txnPhoto: null,
         amountPaid: paid,
@@ -327,14 +357,22 @@ export function seed(): Db {
         createdAt: ts,
       };
       db.sales.push(sale);
-      db.payments.push({
-        id: uid(db.payments),
-        saleId: sale.id,
-        method,
-        bank,
-        amount: paid,
-        createdAt: ts,
-      });
+      if (paid > 0) {
+        db.payments.push({
+          id: uid(db.payments),
+          party: 'sale',
+          saleId: sale.id,
+          purchaseId: null,
+          method,
+          bank,
+          amount: paid,
+          txnRef: sale.txnRef,
+          note: paid + 0.001 < total ? 'Part payment at point of sale' : 'Paid at point of sale',
+          paidAt: ts,
+          takenByUserId: cashier,
+          createdAt: ts,
+        });
+      }
       items.forEach((it) =>
         db.invTx.push({
           id: uid(db.invTx),

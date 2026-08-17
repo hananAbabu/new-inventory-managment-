@@ -7,11 +7,15 @@ import { AppError, mutate, type Tx } from '@/server/mutate';
 import { money, nextRef, num, quantity, writeAudit } from '@/server/workspace';
 import { needsBank } from '@/lib/banks';
 import { money as fmtMoney } from '@/lib/selectors';
-import type { Bank, PayMethod } from '@/lib/types';
+import type { Bank, PayMethod, StockLocation } from '@/lib/types';
 import { roundQty } from '@/lib/units';
 import type { ActionResult } from './shared';
 
 export interface PurchaseInput {
+  /** Which stock the delivery lands in. */
+  location?: StockLocation;
+  /** Money handed over now; the rest is owed to the supplier. */
+  amountPaid?: number;
   supplierId: number;
   payMethod: PayMethod;
   bank: Bank | null;
@@ -43,6 +47,13 @@ async function buildItems(tx: Tx, lines: PurchaseInput['lines']) {
 
 /** Moves an order's goods into stock and logs each line. */
 async function applyReceive(tx: Tx, purchaseId: number, userId: number) {
+  const orderRows = await tx
+    .select({ location: schema.purchases.location })
+    .from(schema.purchases)
+    .where(eq(schema.purchases.id, purchaseId))
+    .limit(1);
+  const location = orderRows[0]?.location ?? 'store';
+
   const purRows = await tx
     .select()
     .from(schema.purchases)
@@ -70,7 +81,10 @@ async function applyReceive(tx: Tx, purchaseId: number, userId: number) {
     await tx
       .update(schema.products)
       .set({
-        qty: quantity(roundQty(num(p.qty) + num(it.qty))),
+        // Deliveries land in the location the order names.
+        ...(location === 'shop'
+          ? { qtyShop: quantity(roundQty(num(p.qtyShop) + num(it.qty))) }
+          : { qtyStore: quantity(roundQty(num(p.qtyStore) + num(it.qty))) }),
         // Receiving restates what the stock cost.
         costPrice: it.cost,
         updatedAt: new Date(),

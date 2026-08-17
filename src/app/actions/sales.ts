@@ -7,11 +7,15 @@ import { AppError, mutate } from '@/server/mutate';
 import { money, nextRef, num, quantity, writeAudit } from '@/server/workspace';
 import { bankShort, needsBank, payMethodLabel } from '@/lib/banks';
 import { money as fmtMoney } from '@/lib/selectors';
-import type { Bank, PayMethod } from '@/lib/types';
+import type { Bank, PayMethod, StockLocation } from '@/lib/types';
 import { formatQty, roundQty } from '@/lib/units';
 import type { ActionResult } from './shared';
 
 export interface SaleInput {
+  /** Which stock the goods leave from. */
+  location?: StockLocation;
+  /** Who owes the balance — required for credit or a short payment. */
+  customerId?: number | null;
   /** Only the product and how much of it — prices come from the database. */
   lines: { productId: number; qty: number }[];
   discountPct: number;
@@ -24,6 +28,8 @@ export interface SaleInput {
 
 export async function completeSale(input: SaleInput): Promise<ActionResult> {
   return mutate(async (tx) => {
+    // Goods leave from wherever the seller says they took them.
+    const location: StockLocation = input.location ?? 'shop';
     const user = await requireUser('admin', 'cashier');
     if (!input.lines.length) throw new AppError('The cart is empty');
 
@@ -122,7 +128,11 @@ export async function completeSale(input: SaleInput): Promise<ActionResult> {
     for (const i of items) {
       await tx
         .update(schema.products)
-        .set({ qty: quantity(roundQty(num(i.product.qty) - i.qty)), updatedAt: new Date() })
+        .set(
+          location === 'shop'
+            ? { qtyShop: quantity(roundQty(num(i.product.qtyShop) - i.qty)), updatedAt: new Date() }
+            : { qtyStore: quantity(roundQty(num(i.product.qtyStore) - i.qty)), updatedAt: new Date() },
+        )
         .where(eq(schema.products.id, i.product.id));
 
       await tx.insert(schema.inventoryTransactions).values({

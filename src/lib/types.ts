@@ -1,5 +1,8 @@
 export type Role = 'admin' | 'storekeeper' | 'cashier';
-export type PayMethod = 'cash' | 'transfer' | 'debit';
+/** Credit means the goods moved but the money has not — somebody owes it. */
+export type PayMethod = 'cash' | 'transfer' | 'credit';
+export type StockLocation = 'store' | 'shop';
+export type PaymentStatus = 'paid' | 'partial' | 'pending';
 export type Bank =
   | 'cbe'
   | 'boa'
@@ -78,6 +81,11 @@ export interface Product {
   piecesPerCarton: number | null;
   costPrice: number;
   sellPrice: number;
+  /** Warehouse stock. */
+  qtyStore: number;
+  /** Counter stock. */
+  qtyShop: number;
+  /** Store + shop, computed by the database. Never written directly. */
   qty: number;
   minStock: number;
   createdAt: number;
@@ -105,8 +113,13 @@ export interface Sale {
   tax: number;
   total: number;
   payMethod: PayMethod;
-  /** Which bank cleared the money — null for cash. */
+  /** Which bank cleared the money — null for cash and credit. */
   bank: Bank | null;
+  /** Who owes the balance. Required once anything is left unpaid. */
+  customerId: number | null;
+  /** Which stock the goods left from. */
+  location: StockLocation;
+  paymentStatus: PaymentStatus;
   /** Bank transaction / reference number, for anything not paid in cash. */
   txnRef: string | null;
   /** Photographed transfer slip, stored as a compressed data URL. */
@@ -134,18 +147,38 @@ export interface Purchase {
   total: number;
   status: PurchaseStatus;
   payMethod: PayMethod;
-  /** Which bank the money left from — null for cash. */
+  /** Which bank the money left from — null for cash and credit. */
   bank: Bank | null;
+  amountPaid: number;
+  paymentStatus: PaymentStatus;
+  /** Which stock the delivery landed in. */
+  location: StockLocation;
   createdAt: number;
   receivedAt: number | null;
 }
 
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string;
+  address: string;
+  note: string;
+  createdAt: number;
+}
+
+/** One instalment against a sale or a purchase. */
 export interface Payment {
   id: number;
-  saleId: number;
+  party: 'sale' | 'purchase';
+  saleId: number | null;
+  purchaseId: number | null;
   method: PayMethod;
   bank: Bank | null;
   amount: number;
+  txnRef: string | null;
+  note: string;
+  paidAt: number;
+  takenByUserId: number | null;
   createdAt: number;
 }
 
@@ -201,6 +234,7 @@ export interface Db {
   users: User[];
   categories: Category[];
   suppliers: Supplier[];
+  customers: Customer[];
   products: Product[];
   sales: Sale[];
   purchases: Purchase[];

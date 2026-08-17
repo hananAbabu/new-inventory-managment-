@@ -5,7 +5,7 @@ import { requireUser } from '@/server/auth';
 import { schema } from '@/server/db';
 import { AppError, mutate, type Tx } from '@/server/mutate';
 import { money, quantity, writeAudit } from '@/server/workspace';
-import type { ProductType, Unit } from '@/lib/types';
+import type { ProductType, StockLocation, Unit } from '@/lib/types';
 import type { ActionResult } from './shared';
 
 export interface ProductInput {
@@ -22,6 +22,7 @@ export interface ProductInput {
   minStock: number;
   /** Opening stock — only honoured when creating. */
   qty?: number;
+  location?: StockLocation;
 }
 
 function validateProduct(input: ProductInput) {
@@ -57,6 +58,8 @@ export async function createProduct(input: ProductInput): Promise<ActionResult> 
     await assertSkuFree(tx, input.sku.trim());
 
     const openingQty = Math.max(0, input.qty ?? 0);
+    // Opening stock has to land somewhere; the store unless the form says the counter.
+    const openingLocation = input.location ?? 'store';
     const rows = await tx
       .insert(schema.products)
       .values({
@@ -70,7 +73,8 @@ export async function createProduct(input: ProductInput): Promise<ActionResult> 
         piecesPerCarton: input.piecesPerCarton,
         costPrice: money(input.costPrice),
         sellPrice: money(input.sellPrice),
-        qty: quantity(openingQty),
+        qtyStore: quantity(openingLocation === 'store' ? openingQty : 0),
+        qtyShop: quantity(openingLocation === 'shop' ? openingQty : 0),
         minStock: quantity(input.minStock),
       })
       .returning({ id: schema.products.id });
@@ -84,8 +88,9 @@ export async function createProduct(input: ProductInput): Promise<ActionResult> 
         unit: input.unit,
         type: 'initial',
         qty: quantity(openingQty),
+        location: openingLocation,
         userId: user.id,
-        note: 'Opening stock',
+        note: `Opening ${openingLocation} stock`,
       });
     }
     await writeAudit(tx, user.id, 'PRODUCT', 'add', `Added ${input.sku} — ${input.name}`);

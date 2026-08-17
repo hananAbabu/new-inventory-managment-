@@ -24,7 +24,22 @@ async function main() {
   const ws = await loadWorkspace();
 
   check('workspace loads', !!ws.settings.shopName, ws.settings.shopName);
-  check('products present', ws.products.length === 13, `${ws.products.length} products`);
+  // Assert the seeded catalogue is intact rather than an exact count, which drifts
+  // as soon as anyone adds a product by hand.
+  const seededSkus = ['SG-1001', 'PA-2001', 'PL-3001', 'RC-4001', 'OL-5001', 'OL-5005', 'PL-3003'];
+  check(
+    'seeded catalogue present',
+    seededSkus.every((sku) => ws.products.some((p) => p.sku === sku)),
+    `${ws.products.length} products`,
+  );
+  // A migrated database starts with no customers, which is correct — only assert
+  // the table loads into the workspace.
+  check('customers load', Array.isArray(ws.customers), `${ws.customers.length} customers`);
+  check(
+    'stock split across locations',
+    ws.products.every((p) => Math.abs(p.qtyStore + p.qtyShop - p.qty) < 0.001),
+    'store + shop equals the generated total',
+  );
   check('sales present', ws.sales.length > 0, `${ws.sales.length} sales`);
   check('expenses present', ws.expenses.length === 8, `${ws.expenses.length} expenses`);
 
@@ -58,7 +73,7 @@ async function main() {
 
   // A sale, written the way the action writes it, then rolled back.
   const before = num(
-    (await db.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qty,
+    (await db.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qtyStore,
   );
   try {
     await db.transaction(async (tx) => {
@@ -92,11 +107,11 @@ async function main() {
       });
       await tx
         .update(schema.products)
-        .set({ qty: quantity(before - 10) })
+        .set({ qtyStore: quantity(before - 10) })
         .where(eq(schema.products.id, sugar.id));
 
       const after = num(
-        (await tx.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qty,
+        (await tx.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qtyStore,
       );
       check('sale writes and decrements stock', after === before - 10, `${before} → ${after} kg`);
       check('reference generated', /^S-\d{5}$/.test(ref), ref);
@@ -107,7 +122,7 @@ async function main() {
   }
 
   const restored = num(
-    (await db.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qty,
+    (await db.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qtyStore,
   );
   check('transaction rolled back cleanly', restored === before, `${restored} kg`);
 

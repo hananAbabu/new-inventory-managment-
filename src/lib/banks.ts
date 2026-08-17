@@ -26,14 +26,22 @@ export function bankShort(b: Bank | null | undefined): string {
 export const PAY_METHODS: { value: PayMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
   { value: 'transfer', label: 'Transfer' },
-  { value: 'debit', label: 'Debit' },
+  { value: 'credit', label: 'Credit' },
 ];
 
 export function payMethodLabel(m: PayMethod): string {
   return PAY_METHODS.find((x) => x.value === m)?.label ?? m;
 }
 
-/** Cash never touches a bank; transfer and debit always name one. */
+/** Only a transfer clears through a bank; cash and credit do not. */
 export function needsBank(m: PayMethod): boolean {
-  return m !== 'cash';
+  return m === 'transfer';
+}
+
+/**
+ * Credit, or anything short-paid, leaves a balance owing, and a balance has to be
+ * attached to a named customer or nobody knows who to collect from.
+ */
+export function requiresCustomer(method: PayMethod, paid: number, total: number): boolean {
+  return method === 'credit' || paid + 0.001 < total;
 }
