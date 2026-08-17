@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import { deleteExpense, saveExpense } from '@/app/actions/expenses';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/expenses';
 import { userName } from '@/lib/selectors';
 import type { Bank, Expense, ExpenseCategory, PayMethod } from '@/lib/types';
-import { DAY, fd, nextRef, startOfDay, uid } from '@/lib/utils';
+import { DAY, fd, startOfDay } from '@/lib/utils';
 
 const RANGES = [0, 7, 30, -1];
 
@@ -23,7 +24,7 @@ function rangeLabel(r: number): string {
 }
 
 export default function ExpensesPage() {
-  const { db, update, money } = useStore();
+  const { db, run, money } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -61,11 +62,7 @@ export default function ExpensesPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.expenses = draft.expenses.filter((x) => x.id !== expense.id);
-      audit('EXPENSE', 'delete', `Deleted ${expense.ref} · ${money(expense.amount)}`);
-    });
-    toast('Expense deleted');
+    if (await run(() => deleteExpense(expense.id))) toast('Expense deleted');
   }
 
   return (
@@ -200,8 +197,9 @@ function toDateInput(ts: number): string {
 }
 
 function ExpenseForm({ expense, onClose }: { expense: Expense | null; onClose: () => void }) {
-  const { db, me, update, money } = useStore();
+  const { run } = useStore();
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
 
   const [date, setDate] = useState(toDateInput(expense?.date ?? Date.now()));
   const [category, setCategory] = useState<ExpenseCategory>(expense?.category ?? 'rent');
@@ -211,7 +209,7 @@ function ExpenseForm({ expense, onClose }: { expense: Expense | null; onClose: (
   const [bank, setBank] = useState<Bank>(expense?.bank ?? 'cbe');
   const [txnRef, setTxnRef] = useState(expense?.txnRef ?? '');
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const desc = description.trim();
     const amountV = parseFloat(amount);
@@ -229,44 +227,22 @@ function ExpenseForm({ expense, onClose }: { expense: Expense | null; onClose: (
       return;
     }
 
-    const chosenBank = needsBank(payMethod) ? bank : null;
-    const ref = needsBank(payMethod) ? txnRef.trim() || null : null;
+    setBusy(true);
+    const ok = await run(() =>
+      saveExpense(expense?.id ?? null, {
+        date: parsedDate,
+        category,
+        description: desc,
+        amount: amountV,
+        payMethod,
+        bank: needsBank(payMethod) ? bank : null,
+        txnRef: needsBank(payMethod) ? txnRef.trim() || null : null,
+      }),
+    );
+    setBusy(false);
+    if (!ok) return;
 
-    if (expense) {
-      update((draft, audit) => {
-        const target = draft.expenses.find((x) => x.id === expense.id);
-        if (!target) return;
-        target.date = parsedDate;
-        target.category = category;
-        target.description = desc;
-        target.amount = amountV;
-        target.payMethod = payMethod;
-        target.bank = chosenBank;
-        target.txnRef = ref;
-        audit('EXPENSE', 'edit', `${target.ref} · ${money(amountV)} · ${desc}`);
-      });
-      toast('Expense updated');
-    } else {
-      const newRef = nextRef('E', db.expenses);
-      update((draft, audit) => {
-        draft.expenses.push({
-          id: uid(draft.expenses),
-          ref: newRef,
-          date: parsedDate,
-          category,
-          description: desc,
-          amount: amountV,
-          payMethod,
-          bank: chosenBank,
-          txnRef: ref,
-          byUserId: me!.id,
-          createdAt: Date.now(),
-        });
-        audit('EXPENSE', 'add', `${newRef} · ${money(amountV)} · ${desc}`);
-      });
-      toast('Expense recorded');
-    }
-
+    toast(expense ? 'Expense updated' : 'Expense recorded');
     onClose();
   }
 
@@ -382,7 +358,7 @@ function ExpenseForm({ expense, onClose }: { expense: Expense | null; onClose: (
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> {expense ? 'Save changes' : 'Record expense'}
           </button>
         </ModalFooter>

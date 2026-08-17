@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { recordMovement } from '@/app/actions/inventory';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import type { TxType } from '@/lib/types';
 import { formatQty, parseQty, qtyStep, roundQty, unitShort } from '@/lib/units';
-import { uid } from '@/lib/utils';
 
 type MovementType = Extract<TxType, 'received' | 'damage' | 'lost' | 'adjustment'>;
 
@@ -27,8 +27,9 @@ export function MovementForm({
   preType?: MovementType;
   onClose: () => void;
 }) {
-  const { db, me, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
 
   const [pid, setPid] = useState(productId ?? db.products[0]?.id ?? 0);
   const [type, setType] = useState<MovementType>(preType);
@@ -37,7 +38,7 @@ export function MovementForm({
 
   const selectedUnit = db.products.find((x) => x.id === Number(pid))?.unit ?? 'pcs';
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const product = db.products.find((x) => x.id === Number(pid));
     if (!product) {
@@ -53,38 +54,18 @@ export function MovementForm({
       toast('Quantity must be positive for this type', 'error');
       return;
     }
-    const delta = type === 'received' ? qtyV : type === 'adjustment' ? qtyV : -qtyV;
+    const delta = type === 'received' || type === 'adjustment' ? qtyV : -qtyV;
     if (roundQty(product.qty + delta) < 0) {
       toast(`Insufficient stock — only ${formatQty(product.qty, product.unit)} on hand`, 'error');
       return;
     }
 
-    const now = Date.now();
-    update((draft, audit) => {
-      const p = draft.products.find((x) => x.id === product.id);
-      if (!p) return;
-      p.qty = roundQty(p.qty + delta);
-      p.updatedAt = now;
-      draft.invTx.push({
-        id: uid(draft.invTx),
-        date: now,
-        productId: p.id,
-        sku: p.sku,
-        name: p.name,
-        unit: p.unit,
-        type,
-        qty: delta,
-        userId: me!.id,
-        note: note.trim(),
-      });
-      audit(
-        'INVENTORY',
-        type,
-        `${delta > 0 ? '+' : ''}${formatQty(delta, p.unit)} · ${p.sku}${
-          note.trim() ? ' · ' + note.trim() : ''
-        }`,
-      );
-    });
+    setBusy(true);
+    const ok = await run(() =>
+      recordMovement({ productId: product.id, type, qty: qtyV, note: note.trim() }),
+    );
+    setBusy(false);
+    if (!ok) return;
 
     toast('Stock movement recorded');
     const after = roundQty(product.qty + delta);
@@ -168,7 +149,7 @@ export function MovementForm({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> Save movement
           </button>
         </ModalFooter>

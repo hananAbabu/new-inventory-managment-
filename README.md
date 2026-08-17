@@ -1,17 +1,23 @@
 # Inventory Management System
 
-A Next.js (App Router) + React + TypeScript port of the original single-file
-`inv.html` demo. Same design, same data model, same behaviour — split into real
-routes, components and typed modules.
+A Next.js (App Router) + React + TypeScript inventory, point-of-sale and
+purchasing system for a wholesale shop, backed by Postgres.
 
 ## Running it
 
+The database runs in this project's own container, on port **15433** so it
+cannot collide with anything else you have on the default Postgres port.
+
 ```bash
 npm install
+cp .env.example .env.local
+npm run db:up
+npm run db:migrate
+npm run db:seed
 npm run dev
 ```
 
-Then open http://localhost:3000. Demo accounts:
+Then open http://localhost:3000. Sign in with:
 
 | Role        | Username  | Password     |
 | ----------- | --------- | ------------ |
@@ -19,13 +25,41 @@ Then open http://localhost:3000. Demo accounts:
 | Storekeeper | `keeper`  | `keeper123`  |
 | Cashier     | `cashier` | `cashier123` |
 
-Other scripts: `npm run build`, `npm start`, `npm run typecheck`.
+| Script                | What it does                                      |
+| --------------------- | ------------------------------------------------- |
+| `npm run db:up`       | starts the Postgres container                     |
+| `npm run db:down`     | stops it (the named volume keeps the data)        |
+| `npm run db:generate` | writes a new migration from schema changes        |
+| `npm run db:migrate`  | applies pending migrations                        |
+| `npm run db:seed`     | fills an empty database; refuses a populated one  |
+| `npm run db:reset`    | truncates everything, then seeds                  |
+| `npm run db:studio`   | opens Drizzle Studio against the database         |
+
+Also `npm run build`, `npm start`, `npm run typecheck`.
 
 ## How it is put together
 
-Everything runs in the browser. The workspace is seeded into `localStorage`
-(`msims_db_v1`) on first load and the signed-in user is kept in `msims_ses_v1`,
-exactly as the original did — there is no server, no database and no API.
+Postgres holds everything. The browser holds no data: it signs in, receives the
+workspace, and calls server actions to change it.
+
+```
+sign in ──▶ server action ──▶ Postgres
+                  │
+workspace ◀───────┘   every mutation returns the refreshed workspace,
+                      which the client swaps in wholesale
+```
+
+Reads are one query set: signing in loads the whole workspace, which suits one
+shop's volume and lets every page keep reading from a single in-memory object.
+Writes are individually typed server actions — `saveExpense`, `recordSale`,
+`receivePurchase` and so on — each of which re-checks the session and the role
+on the server, runs inside a transaction, writes its audit row, and returns the
+new workspace. A client that lies about its role gets nothing: the check is in
+the action, not the UI.
+
+Passwords are bcrypt hashes and never leave the database — the workspace sent to
+the browser carries an empty string in their place. The session is a random id
+in an httpOnly, SameSite=Lax cookie with a row in `sessions`.
 
 ```
 src/
@@ -40,8 +74,19 @@ src/
       products/  categories/  inventory/  low-stock/
       sales/     my-sales/    suppliers/   purchases/
       reports/   users/       audit/       settings/
+  server/                server-only, never bundled into the browser
+    schema.ts            Drizzle tables and enums
+    db.ts                the connection, built lazily on first query
+    auth.ts              bcrypt hashing, sessions, requireUser(role)
+    workspace.ts         loads the whole workspace and reshapes it for the client
+    mutate.ts            transaction wrapper returning the refreshed workspace
+    seed-db.ts           fills the database
+    verify.ts            read-path and schema smoke test
+  app/actions/           'use server' entry points, one file per area
+    session.ts  catalog.ts  inventory.ts  purchases.ts  sales.ts
+    expenses.ts admin.ts
   components/
-    store.tsx            the database: load, persist, mutate, sign in/out
+    store.tsx            client cache of the workspace + run(action) helper
     app-shell.tsx        navigation chrome + low-stock bell + denied panel
     modal.tsx            <Modal> and the useConfirm() promise dialog
     toast.tsx            useToast()
@@ -52,8 +97,7 @@ src/
     forms/               product and stock-movement forms
   lib/
     types.ts             every entity in the workspace
-    seed.ts              the demo dataset (deterministic PRNG)
-    migrate.ts           upgrades workspaces saved by an older build
+    seed.ts              the starting dataset (deterministic PRNG)
     banks.ts             payment methods and the bank list
     units.ts             units of measure and quantity parsing/formatting
     selectors.ts         derived reads: money, low stock, badges, names
@@ -73,16 +117,16 @@ appears for the methods that need one, so a cash sale can never carry a stale
 bank.
 
 Reports has a **Banks** tab that reconciles each account on its own: money
-received through it (sales), money paid out of it (received purchases), and the
-net, with cash totals shown separately so nothing is double-counted.
+received through it (sales), money paid out of it (received purchases and
+expenses), and the net, with cash totals shown separately so nothing is
+double-counted.
 
 A non-cash sale must also carry proof: a **transaction number**, a photographed
 **transfer slip**, or both — the register refuses to close the sale without at
 least one. The number prints on the receipt; the photo is shown on screen with
 it. Slips are downscaled to 1000 px and re-encoded as JPEG (`src/lib/image.ts`)
-because the whole workspace shares one ~5 MB localStorage budget, and anything
-still over 400 KB after that is rejected. If a write does exceed the quota the
-store says so rather than looking saved and vanishing on reload.
+before they are sent, so the row stays small and the upload stays quick; anything
+still over 400 KB after that is rejected.
 
 ### What the storekeeper cannot see
 
@@ -108,20 +152,26 @@ stock levels) are unit-consistent and still add up.
 
 ### Writing to the workspace
 
-All mutations go through one function, so persistence and the audit trail can
-never be forgotten:
+Pages never touch the database. They call a server action through `run`, which
+swaps in the workspace the action returns and surfaces any error as a toast:
 
 ```ts
-const { update } = useStore();
+const { run } = useStore();
 
-update((draft, audit) => {
-  draft.products.push(newProduct);
-  audit('PRODUCT', 'add', `Added ${sku} — ${name}`);
-});
+if (await run(() => saveExpense(null, input))) toast('Expense recorded');
 ```
 
-`update` clones the current state, applies the recipe, writes it to
-`localStorage` and re-renders. `audit` stamps the entry with the signed-in user.
+Server-side, every action goes through `mutate`, so a write, its audit row and
+the refreshed workspace are one transaction — none of them can be forgotten:
+
+```ts
+return mutate(async (tx) => {
+  const user = await requireUser('admin');      // session + role, server-side
+  const ref = await nextRef(tx, schema.expenses, 'E');
+  await tx.insert(schema.expenses).values({ ... });
+  await writeAudit(tx, user.id, 'EXPENSE', 'add', `${ref} · ${amount}`);
+});
+```
 
 ### Permissions
 
@@ -137,25 +187,25 @@ is locked: its stock is already in the inventory log, and rewriting or removing
 it would leave that log describing goods no order accounts for. Editing an
 ordered purchase can also receive it in one step.
 
-### Older saved workspaces
+### Schema changes
 
-`src/lib/migrate.ts` upgrades a workspace saved by an earlier build on load —
-`shopkeeper` becomes `storekeeper`, the `card` and `mobile` payment methods
-become `transfer` and `debit`, products without a unit default to pieces. Nobody
-has to reset their data.
+`src/server/schema.ts` is the source of truth. Change it, then:
 
-## Differences from `inv.html`
+```bash
+npm run db:generate    # writes the SQL migration into drizzle/
+npm run db:migrate     # applies it
+```
 
-- Pages are real URLs, so the browser's back button, refresh and deep links work.
-- Rendering is React instead of `innerHTML` string building, which removes the
-  hand-rolled `esc()` escaping and the global `onclick="…"` handlers.
-- Fonts are self-hosted through `next/font` rather than pulled from a CDN.
-- One markup bug is fixed on the way over: the discount cell in the sales table
-  was emitted outside its `<td>`, so it landed in the wrong column.
+Migrations are committed, so every copy of the database can be brought up to the
+same shape. Do not hand-edit a migration that has already been applied.
 
-## Where a real backend would go
+## Notes
 
-The data layer is deliberately isolated in `src/lib` and `components/store.tsx`.
-Replacing `localStorage` with a database means swapping `update`/`loadDb` for
-server actions or API routes — the pages and components read from `useStore()`
-and would not need to change shape.
+- The receipt is framed like the transfer-slip attachment — same rounded border
+  and inset panel — so a receipt and a slip read as two of the same document.
+  Printing strips the frame and prints the receipt alone.
+- Sale and purchase lines live in their own tables (`sale_items`,
+  `purchase_items`); the workspace rebuilds them into the embedded arrays the
+  pages read.
+- Money is `numeric(12,2)` and quantities `numeric(12,3)`; both are parsed back
+  into numbers on the way out, so no float drift reaches the database.

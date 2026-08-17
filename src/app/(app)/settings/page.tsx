@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { updateSettings } from '@/app/actions/admin';
 import { Icon } from '@/components/icon';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 
 export default function SettingsPage() {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
   const s = db.settings;
 
@@ -17,8 +18,9 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState(s.phone);
   const [address, setAddress] = useState(s.address);
   const [receiptFooter, setReceiptFooter] = useState(s.receiptFooter);
+  const [busy, setBusy] = useState(false);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const tax = parseFloat(taxRate) || 0;
     const disc = parseInt(maxDiscount, 10);
@@ -30,18 +32,20 @@ export default function SettingsPage() {
       toast('Max discount must be 0–100', 'error');
       return;
     }
-    update((draft, audit) => {
-      const st = draft.settings;
-      st.shopName = shopName.trim() || st.shopName;
-      st.currency = currency || '$';
-      st.taxRate = tax;
-      st.maxDiscount = disc;
-      st.phone = phone.trim();
-      st.address = address.trim();
-      st.receiptFooter = receiptFooter.trim();
-      audit('SETTINGS', 'update', 'Updated system settings');
-    });
-    toast('Settings saved');
+    setBusy(true);
+    const ok = await run(() =>
+      updateSettings({
+        shopName,
+        currency,
+        taxRate: tax,
+        maxDiscount: disc,
+        phone,
+        address,
+        receiptFooter,
+      }),
+    );
+    setBusy(false);
+    if (ok) toast('Settings saved');
   }
 
   return (
@@ -129,7 +133,7 @@ export default function SettingsPage() {
               />
             </div>
 
-            <button className="btn btn-primary" type="submit">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
               <Icon name="check" /> Save settings
             </button>
           </form>

@@ -4,27 +4,28 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './icon';
-import { useStore } from './store';
+import { useAuth, useStore } from './store';
 import { can, navFor, pageFor } from '@/lib/navigation';
 import { lowStock } from '@/lib/selectors';
 import { formatQty } from '@/lib/units';
 import { initials } from '@/lib/utils';
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { db, me, logout } = useStore();
+  const { status, db, me, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [sideOpen, setSideOpen] = useState(false);
 
   useEffect(() => {
-    if (!me) router.replace('/login');
-  }, [me, router]);
+    if (status === 'anon') router.replace('/login');
+  }, [status, router]);
 
   useEffect(() => {
     setSideOpen(false);
   }, [pathname]);
 
-  if (!me) return <div className="boot">Redirecting to sign-in…</div>;
+  if (status === 'loading') return <div className="boot">Loading workspace…</div>;
+  if (!db || !me) return <div className="boot">Redirecting to sign-in…</div>;
 
   const page = pageFor(pathname);
   const low = lowStock(db);

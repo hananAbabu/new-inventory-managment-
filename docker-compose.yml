@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inventory-next-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+      POSTGRES_DB: inventory
+    # 15433 on the host: 15432 belongs to another project's database.
+    ports:
+      - '127.0.0.1:15433:5432'
+    volumes:
+      - inventory-next-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U inventory -d inventory']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  inventory-next-db-data:

@@ -1,20 +1,20 @@
 'use client';
 
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { completeSale as completeSaleAction } from '@/app/actions/sales';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody } from '@/components/modal';
 import { ReceiptModal } from '@/components/receipt';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { EmptyState } from '@/components/ui';
-import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
+import { BANKS, PAY_METHODS, bankShort, needsBank } from '@/lib/banks';
 import { MAX_SLIP_BYTES, compressImage, dataUrlBytes, formatBytes } from '@/lib/image';
-import type { Bank, CartLine, PayMethod, Sale, SaleItem } from '@/lib/types';
+import type { Bank, CartLine, PayMethod, Sale } from '@/lib/types';
 import { formatQty, formatQtyNumber, parseQty, qtyMin, roundQty, unitShort } from '@/lib/units';
-import { nextRef, uid } from '@/lib/utils';
 
 export default function PosPage() {
-  const { db, me, update, money } = useStore();
+  const { db, me, run, money } = useStore();
   const toast = useToast();
 
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -24,6 +24,22 @@ export default function PosPage() {
   const [discount, setDiscount] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
   const [receipt, setReceipt] = useState<Sale | null>(null);
+  const [pendingReceipt, setPendingReceipt] = useState(false);
+
+  // The server creates the sale, so the receipt is picked up from the refreshed
+  // workspace rather than from anything this component built.
+  useEffect(() => {
+    if (!pendingReceipt) return;
+    const mine = db.sales.filter((s) => s.cashierId === me.id);
+    const latest = mine.length
+      ? mine.reduce((a, b) => (b.createdAt >= a.createdAt ? b : a))
+      : null;
+    setPendingReceipt(false);
+    if (latest) {
+      toast(`Sale ${latest.ref} completed — ${money(latest.total)}`);
+      setReceipt(latest);
+    }
+  }, [pendingReceipt, db.sales, me.id, money, toast]);
 
   const grid = useMemo(
     () =>
@@ -127,7 +143,7 @@ export default function PosPage() {
     setDiscount(d);
   }
 
-  function completeSale(
+  async function completeSale(
     method: PayMethod,
     bank: Bank | null,
     paid: number,
@@ -135,6 +151,8 @@ export default function PosPage() {
     txnPhoto: string | null,
   ) {
     if (!cart.length) return;
+
+    // Stock and prices are re-checked on the server; this is just a fast local guard.
     for (const l of cart) {
       const p = db.products.find((x) => x.id === l.productId);
       if (!p || p.qty < l.qty) {
@@ -143,86 +161,30 @@ export default function PosPage() {
       }
     }
 
-    const now = Date.now();
-    const items: SaleItem[] = cart.map((l) => {
-      const p = db.products.find((x) => x.id === l.productId)!;
-      return {
-        productId: p.id,
-        sku: p.sku,
-        name: p.name,
-        unit: p.unit,
-        price: p.sellPrice,
-        cost: p.costPrice,
-        qty: l.qty,
-      };
-    });
-
-    const sale: Sale = {
-      id: uid(db.sales),
-      ref: nextRef('S', db.sales),
-      cashierId: me!.id,
-      items,
-      subtotal: totals.subtotal,
-      discountPct: discount,
-      discount: totals.discount,
-      tax: totals.tax,
-      total: totals.total,
-      payMethod: method,
-      bank,
-      txnRef,
-      txnPhoto,
-      amountPaid: paid,
-      change: Math.max(0, paid - totals.total),
-      createdAt: now,
-    };
-
-    update((draft, audit) => {
-      draft.sales.push(sale);
-      draft.payments.push({
-        id: uid(draft.payments),
-        saleId: sale.id,
-        method,
+    const soldLines = cart.map((l) => ({ productId: l.productId, qty: l.qty }));
+    const ok = await run(() =>
+      completeSaleAction({
+        lines: soldLines,
+        discountPct: discount,
+        payMethod: method,
         bank,
-        amount: paid,
-        createdAt: now,
-      });
-      items.forEach((it) => {
-        const p = draft.products.find((x) => x.id === it.productId);
-        if (!p) return;
-        p.qty = roundQty(p.qty - it.qty);
-        p.updatedAt = now;
-        draft.invTx.push({
-          id: uid(draft.invTx),
-          date: now,
-          productId: p.id,
-          sku: it.sku,
-          name: it.name,
-          unit: it.unit,
-          type: 'sale',
-          qty: -it.qty,
-          userId: me!.id,
-          note: 'Sale ' + sale.ref,
-        });
-      });
-      audit(
-        'SALE',
-        'sale',
-        `${sale.ref} · ${money(sale.total)} · ${items.length} lines · ${payMethodLabel(method)}${
-          bank ? ' (' + bankShort(bank) + ')' : ''
-        }${txnRef ? ' · ref ' + txnRef : ''}${txnPhoto ? ' · slip attached' : ''}`,
-      );
-    });
+        txnRef,
+        txnPhoto,
+        amountPaid: paid,
+      }),
+    );
+    if (!ok) return;
 
-    const lowNow = items
-      .map((it) => {
-        const p = db.products.find((x) => x.id === it.productId);
-        return p ? { ...p, qty: roundQty(p.qty - it.qty) } : null;
+    const lowNow = soldLines
+      .map((l) => {
+        const p = db.products.find((x) => x.id === l.productId);
+        return p ? { ...p, qty: roundQty(p.qty - l.qty) } : null;
       })
       .filter((p) => p && p.qty <= p.minStock);
 
     clearCart();
     setPayOpen(false);
-    toast(`Sale ${sale.ref} completed — ${money(sale.total)}`);
+    setPendingReceipt(true);
     lowNow.forEach((p) =>
       toast(
         `${p!.name} is low on stock (${formatQty(p!.qty, p!.unit)} left, min ${formatQty(
@@ -232,7 +194,6 @@ export default function PosPage() {
         'warning',
       ),
     );
-    setReceipt(sale);
   }
 
   return (

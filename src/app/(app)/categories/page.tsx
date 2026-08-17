@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { deleteCategory, saveCategory } from '@/app/actions/catalog';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import type { Category } from '@/lib/types';
-import { uid } from '@/lib/utils';
 
 export default function CategoriesPage() {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -37,11 +37,7 @@ export default function CategoriesPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.categories = draft.categories.filter((x) => x.id !== c.id);
-      audit('CATEGORY', 'delete', 'Deleted category ' + c.name);
-    });
-    toast('Category deleted');
+    if (await run(() => deleteCategory(c.id))) toast('Category deleted');
   }
 
   return (
@@ -102,12 +98,13 @@ export default function CategoriesPage() {
 }
 
 function CategoryForm({ category, onClose }: { category: Category | null; onClose: () => void }) {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
   const [name, setName] = useState(category?.name ?? '');
   const [description, setDescription] = useState(category?.description ?? '');
+  const [busy, setBusy] = useState(false);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const nameV = name.trim();
     if (!nameV) {
@@ -118,22 +115,10 @@ function CategoryForm({ category, onClose }: { category: Category | null; onClos
       toast('Category already exists', 'error');
       return;
     }
-    update((draft, audit) => {
-      if (category) {
-        const c = draft.categories.find((x) => x.id === category.id);
-        if (!c) return;
-        c.name = nameV;
-        c.description = description.trim();
-        audit('CATEGORY', 'edit', 'Renamed category to ' + nameV);
-      } else {
-        draft.categories.push({
-          id: uid(draft.categories),
-          name: nameV,
-          description: description.trim(),
-        });
-        audit('CATEGORY', 'add', 'Added category ' + nameV);
-      }
-    });
+    setBusy(true);
+    const ok = await run(() => saveCategory(category?.id ?? null, nameV, description));
+    setBusy(false);
+    if (!ok) return;
     toast('Category saved');
     onClose();
   }
@@ -166,7 +151,7 @@ function CategoryForm({ category, onClose }: { category: Category | null; onClos
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> Save
           </button>
         </ModalFooter>

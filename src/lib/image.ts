@@ -1,16 +1,16 @@
 /**
- * Transfer slips are photographed on a phone — several megabytes each — but the
- * whole workspace lives in localStorage, which holds about 5 MB in total. Every
- * slip is therefore downscaled and re-encoded as JPEG before it is stored.
+ * Transfer slips are photographed on a phone — several megabytes each — and are
+ * stored inline with the sale. Every slip is downscaled and re-encoded as JPEG
+ * first, so the row stays small and the upload stays quick.
  */
 
 const MAX_DIMENSION = 1000;
 const QUALITY = 0.7;
 
-/** Refuse anything that would still eat a meaningful slice of the quota. */
+/** Refuse anything that would still be unreasonable to store on the row. */
 export const MAX_SLIP_BYTES = 400_000;
 
-/** Rough decoded size of a data URL, which is what localStorage will hold. */
+/** Rough decoded size of a data URL, which is what gets stored. */
 export function dataUrlBytes(dataUrl: string): number {
   const comma = dataUrl.indexOf(',');
   const body = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;

@@ -1,6 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import {
+  createPurchase,
+  deletePurchase,
+  receivePurchase,
+  updatePurchase,
+} from '@/app/actions/purchases';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
@@ -9,40 +15,12 @@ import { Badge, EmptyState, Pager, usePaged } from '@/components/ui';
 import { BANKS, PAY_METHODS, bankShort, needsBank, payMethodLabel } from '@/lib/banks';
 import { describePackaging, packNoun, packSize } from '@/lib/product-types';
 import { supName } from '@/lib/selectors';
-import type { Bank, Db, PayMethod, Purchase, PurchaseItem } from '@/lib/types';
+import type { Bank, PayMethod, Purchase } from '@/lib/types';
 import { formatQty, parseQty, qtyMin, qtyStep, roundQty, unitShort } from '@/lib/units';
-import { fd, nextRef, uid } from '@/lib/utils';
-
-/** Moves an ordered purchase into stock — the draft-mutating twin of applyReceive(). */
-function applyReceive(draft: Db, purchaseId: number, userId: number) {
-  const pur = draft.purchases.find((x) => x.id === purchaseId);
-  if (!pur) return;
-  const now = Date.now();
-  pur.items.forEach((it) => {
-    const p = draft.products.find((x) => x.id === it.productId);
-    if (!p) return;
-    p.qty = roundQty(p.qty + it.qty);
-    p.costPrice = it.cost;
-    p.updatedAt = now;
-    draft.invTx.push({
-      id: uid(draft.invTx),
-      date: now,
-      productId: p.id,
-      sku: p.sku,
-      name: p.name,
-      unit: p.unit,
-      type: 'purchase',
-      qty: it.qty,
-      userId,
-      note: 'Purchase ' + pur.ref,
-    });
-  });
-  pur.status = 'received';
-  pur.receivedAt = now;
-}
+import { fd } from '@/lib/utils';
 
 export default function PurchasesPage() {
-  const { db, me, update, money } = useStore();
+  const { db, run, money } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -61,13 +39,11 @@ export default function PurchasesPage() {
     setFormOpen(true);
   }
 
-  function receive(pur: Purchase) {
+  async function receive(pur: Purchase) {
     if (pur.status === 'received') return;
-    update((draft, audit) => {
-      applyReceive(draft, pur.id, me!.id);
-      audit('PURCHASE', 'receive', pur.ref + ' received into stock');
-    });
-    toast(`${pur.ref} received — stock updated`);
+    if (await run(() => receivePurchase(pur.id))) {
+      toast(`${pur.ref} received — stock updated`);
+    }
   }
 
   async function del(pur: Purchase) {
@@ -89,11 +65,7 @@ export default function PurchasesPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.purchases = draft.purchases.filter((x) => x.id !== pur.id);
-      audit('PURCHASE', 'delete', `Deleted order ${pur.ref} · ${money(pur.total)}`);
-    });
-    toast('Purchase order deleted');
+    if (await run(() => deletePurchase(pur.id))) toast('Purchase order deleted');
   }
 
   return (
@@ -229,8 +201,9 @@ interface DraftLine {
 }
 
 function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClose: () => void }) {
-  const { db, me, update, money } = useStore();
+  const { db, run, money } = useStore();
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
 
   const [supplierId, setSupplierId] = useState(purchase?.supplierId ?? db.suppliers[0]?.id ?? 0);
   const [payMethod, setPayMethod] = useState<PayMethod>(purchase?.payMethod ?? 'cash');
@@ -284,76 +257,41 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
     );
   }
 
-  function save(receiveNow: boolean) {
+  async function save(receiveNow: boolean) {
     if (!lines.length) {
       toast('Add at least one product line', 'error');
       return;
     }
-    const items: PurchaseItem[] = lines.map((l) => {
-      const p = db.products.find((x) => x.id === l.productId)!;
-      return {
+
+    const input = {
+      supplierId: Number(supplierId),
+      payMethod,
+      bank: needsBank(payMethod) ? bank : null,
+      // Packs are converted to stock units here, before they reach the server.
+      lines: lines.map((l) => ({
         productId: l.productId,
-        sku: p.sku,
-        name: p.name,
-        unit: p.unit,
         qty: stockQty(l),
         cost: l.cost,
-      };
-    });
-    const total = items.reduce((a, b) => a + b.qty * b.cost, 0);
-    const now = Date.now();
-    const chosenBank = needsBank(payMethod) ? bank : null;
+      })),
+      receive: receiveNow,
+    };
+
+    setBusy(true);
+    const ok = await run(() =>
+      purchase ? updatePurchase(purchase.id, input) : createPurchase(input),
+    );
+    setBusy(false);
+    if (!ok) return;
 
     if (purchase) {
-      update((draft, audit) => {
-        const target = draft.purchases.find((x) => x.id === purchase.id);
-        if (!target || target.status === 'received') return;
-        target.supplierId = Number(supplierId);
-        target.payMethod = payMethod;
-        target.bank = chosenBank;
-        target.items = items;
-        target.total = total;
-        if (receiveNow) applyReceive(draft, target.id, me!.id);
-        audit(
-          'PURCHASE',
-          receiveNow ? 'edit+receive' : 'edit',
-          `${target.ref} · ${money(total)} · ${supName(db, Number(supplierId))}`,
-        );
-      });
       toast(
         receiveNow
           ? `${purchase.ref} updated and received — inventory updated`
           : `Purchase order ${purchase.ref} updated`,
       );
-      onClose();
-      return;
+    } else {
+      toast(receiveNow ? 'Purchase received — inventory updated' : 'Purchase order saved');
     }
-
-    const ref = nextRef('P', db.purchases);
-    update((draft, audit) => {
-      const pur: Purchase = {
-        id: uid(draft.purchases),
-        ref,
-        supplierId: Number(supplierId),
-        byUserId: me!.id,
-        items,
-        total,
-        status: receiveNow ? 'received' : 'ordered',
-        payMethod,
-        bank: chosenBank,
-        createdAt: now,
-        receivedAt: receiveNow ? now : null,
-      };
-      draft.purchases.push(pur);
-      if (receiveNow) applyReceive(draft, pur.id, me!.id);
-      audit(
-        'PURCHASE',
-        receiveNow ? 'create+receive' : 'create',
-        `${ref} · ${money(total)} · ${supName(db, Number(supplierId))}`,
-      );
-    });
-
-    toast(receiveNow ? 'Purchase received — inventory updated' : `Purchase order ${ref} saved`);
     onClose();
   }
 
@@ -533,10 +471,10 @@ function PurchaseForm({ purchase, onClose }: { purchase: Purchase | null; onClos
         <button className="btn btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn btn-ghost" onClick={() => save(false)}>
+        <button className="btn btn-ghost" onClick={() => save(false)} disabled={busy}>
           <Icon name="inbox" /> {purchase ? 'Save changes' : 'Save as ordered'}
         </button>
-        <button className="btn btn-primary" onClick={() => save(true)}>
+        <button className="btn btn-primary" onClick={() => save(true)} disabled={busy}>
           <Icon name="check" /> Save &amp; receive stock
         </button>
       </ModalFooter>

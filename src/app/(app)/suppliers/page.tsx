@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { deleteSupplier, saveSupplier } from '@/app/actions/catalog';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
 import { useToast } from '@/components/toast';
 import type { Supplier } from '@/lib/types';
-import { uid } from '@/lib/utils';
 
 export default function SuppliersPage() {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -37,14 +37,7 @@ export default function SuppliersPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.suppliers = draft.suppliers.filter((x) => x.id !== s.id);
-      draft.products.forEach((p) => {
-        if (p.supplierId === s.id) p.supplierId = null;
-      });
-      audit('SUPPLIER', 'delete', 'Deleted supplier ' + s.name);
-    });
-    toast('Supplier deleted');
+    if (await run(() => deleteSupplier(s.id))) toast('Supplier deleted');
   }
 
   return (
@@ -109,8 +102,9 @@ export default function SuppliersPage() {
 }
 
 function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
 
   const [name, setName] = useState(supplier?.name ?? '');
   const [contact, setContact] = useState(supplier?.contact ?? '');
@@ -118,7 +112,7 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClos
   const [email, setEmail] = useState(supplier?.email ?? '');
   const [address, setAddress] = useState(supplier?.address ?? '');
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const nameV = name.trim();
     if (!nameV) {
@@ -129,24 +123,18 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClos
       toast('Supplier already exists', 'error');
       return;
     }
-    const data = {
-      name: nameV,
-      contact: contact.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      address: address.trim(),
-    };
-    update((draft, audit) => {
-      if (supplier) {
-        const s = draft.suppliers.find((x) => x.id === supplier.id);
-        if (!s) return;
-        Object.assign(s, data);
-        audit('SUPPLIER', 'edit', 'Updated supplier ' + nameV);
-      } else {
-        draft.suppliers.push({ id: uid(draft.suppliers), ...data, createdAt: Date.now() });
-        audit('SUPPLIER', 'add', 'Added supplier ' + nameV);
-      }
-    });
+    setBusy(true);
+    const ok = await run(() =>
+      saveSupplier(supplier?.id ?? null, {
+        name: nameV,
+        contact,
+        phone,
+        email,
+        address,
+      }),
+    );
+    setBusy(false);
+    if (!ok) return;
     toast('Supplier saved');
     onClose();
   }
@@ -209,7 +197,7 @@ function SupplierForm({ supplier, onClose }: { supplier: Supplier | null; onClos
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> Save
           </button>
         </ModalFooter>

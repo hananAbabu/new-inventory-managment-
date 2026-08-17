@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import { fetchPublicSettings } from '@/app/actions/session';
 import { Icon } from '@/components/icon';
-import { useStore } from '@/components/store';
+import { useAuth } from '@/components/store';
 import { useToast } from '@/components/toast';
 import { lowStock } from '@/lib/selectors';
 
@@ -14,39 +15,58 @@ const DEMO_ACCOUNTS = [
 ];
 
 export default function LoginPage() {
-  const { db, me, login } = useStore();
+  const { status, login } = useAuth();
   const toast = useToast();
   const router = useRouter();
 
+  const [shopName, setShopName] = useState('Inventory System');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (me) router.replace('/dashboard');
-  }, [me, router]);
+    fetchPublicSettings()
+      .then((s) => setShopName(s.shopName))
+      .catch(() => undefined);
+  }, []);
 
-  function onSubmit(e: FormEvent) {
+  useEffect(() => {
+    if (status === 'ready') router.replace('/dashboard');
+  }, [status, router]);
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const result = login(username.trim(), password);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await login(username.trim(), password);
+      if (!result.ok) {
+        setError(result.error ?? 'Could not sign in.');
+        return;
+      }
+      const db = result.db!;
+      const user = db.users.find((u) => u.username === username.trim().toLowerCase());
+      if (user) {
+        toast(`Signed in as ${user.name} (${user.role})`);
+        const low = lowStock(db);
+        if (low.length && (user.role === 'admin' || user.role === 'storekeeper')) {
+          setTimeout(
+            () =>
+              toast(
+                `${low.length} product${low.length > 1 ? 's are' : ' is'} at or below minimum stock`,
+                'warning',
+              ),
+            500,
+          );
+        }
+      }
+      router.replace('/dashboard');
+    } catch {
+      setError('Could not reach the server. Is the database running?');
+    } finally {
+      setBusy(false);
     }
-    const user = db.users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase())!;
-    toast(`Signed in as ${user.name} (${user.role})`);
-    const low = lowStock(db);
-    if (low.length && (user.role === 'admin' || user.role === 'storekeeper')) {
-      setTimeout(
-        () =>
-          toast(
-            `${low.length} product${low.length > 1 ? 's are' : ' is'} at or below minimum stock`,
-            'warning',
-          ),
-        500,
-      );
-    }
-    router.replace('/dashboard');
   }
 
   function fillDemo(u: string, p: string) {
@@ -61,20 +81,20 @@ export default function LoginPage() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="https://image.qwenlm.ai/public_source/d340f4da-9f9c-4b62-a978-a4eadc780fe7/173acdfe7-f6c2-4892-a018-a4eadc780fe7.png"
-          alt="Merch shop"
+          alt="Store"
         />
         <div className="veil" />
         <div className="login-brand">
           <div className="brand-mark">
             <Icon name="bag" />
           </div>
-          {db.settings.shopName}
+          {shopName}
         </div>
         <div className="login-copy">
-          <h2>Run your merch shop from one counter.</h2>
+          <h2>Run your shop from one counter.</h2>
           <p>
             Role-based dashboards for owners, storekeepers and cashiers — live inventory tracking, a
-            fast POS, purchasing and profit reports.
+            fast POS, purchasing, expenses and profit reports.
           </p>
         </div>
       </div>
@@ -116,8 +136,9 @@ export default function LoginPage() {
               className="btn btn-primary"
               style={{ width: '100%', justifyContent: 'center', padding: '11px' }}
               type="submit"
+              disabled={busy}
             >
-              <Icon name="lock" /> Sign in securely
+              <Icon name="lock" /> {busy ? 'Signing in…' : 'Sign in securely'}
             </button>
           </form>
 
@@ -148,7 +169,7 @@ export default function LoginPage() {
               textAlign: 'center',
             }}
           >
-            Demo build — all data is stored locally in your browser.
+            Passwords are hashed and verified on the server.
           </div>
         </div>
       </div>

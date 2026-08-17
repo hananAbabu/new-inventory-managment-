@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { deleteProduct } from '@/app/actions/catalog';
 import { ProductForm } from '@/components/forms/product-form';
 import { Icon } from '@/components/icon';
 import { useConfirm } from '@/components/modal';
@@ -16,7 +17,7 @@ import { fdS } from '@/lib/utils';
 type SortField = 'sku' | 'name' | 'price' | 'qty';
 
 export default function ProductsPage() {
-  const { db, update, money } = useStore();
+  const { db, run, money } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -71,11 +72,7 @@ export default function ProductsPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.products = draft.products.filter((x) => x.id !== p.id);
-      audit('PRODUCT', 'delete', `Deleted ${p.sku} — ${p.name}`);
-    });
-    toast('Product deleted');
+    if (await run(() => deleteProduct(p.id))) toast('Product deleted');
   }
 
   return (

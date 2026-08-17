@@ -9,177 +9,130 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useToast } from './toast';
-import { migrate, type LegacyDb } from '@/lib/migrate';
-import { seed } from '@/lib/seed';
+import { fetchWorkspace, signIn, signOut } from '@/app/actions/session';
+import type { ActionResult } from '@/app/actions/shared';
 import { money as fmtMoney } from '@/lib/selectors';
-import type { Db, Session, User } from '@/lib/types';
-import { uid } from '@/lib/utils';
+import type { Db, User } from '@/lib/types';
+import { useToast } from './toast';
 
-// Bumped when the catalogue was standardised on the four product configurations.
-// Anything saved under msims_db_v1 is left in place, untouched, rather than migrated.
-const LS_DB = 'msims_db_v2';
-const LS_SES = 'msims_ses_v1';
-
-export type AuditFn = (group: string, action: string, detail: string) => void;
-/** A mutation recipe: mutate the draft, optionally logging to the audit trail. */
-export type Recipe = (draft: Db, audit: AuditFn) => void;
+type Status = 'loading' | 'anon' | 'ready';
 
 interface StoreValue {
-  db: Db;
+  status: Status;
+  db: Db | null;
   me: User | null;
-  session: Session | null;
-  update: (recipe: Recipe) => void;
-  login: (username: string, password: string) => { ok: true } | { ok: false; error: string };
-  logout: () => void;
+  /** Runs a server action, swapping in the workspace it returns. */
+  run: (fn: () => Promise<ActionResult>) => Promise<boolean>;
+  login: (username: string, password: string) => Promise<{ ok: boolean; error?: string; db?: Db }>;
+  logout: () => Promise<void>;
   money: (n: number | undefined | null) => string;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
 
-function loadDb(): Db {
-  try {
-    const raw = localStorage.getItem(LS_DB);
-    if (raw) {
-      const d = JSON.parse(raw) as LegacyDb;
-      if (d && d.users && d.settings && d.products) {
-        const upgraded = migrate(d);
-        localStorage.setItem(LS_DB, JSON.stringify(upgraded));
-        return upgraded;
-      }
-    }
-  } catch {
-    /* corrupt payload — fall through to a fresh seed */
-  }
-  const fresh = seed();
-  localStorage.setItem(LS_DB, JSON.stringify(fresh));
-  return fresh;
-}
-
-function loadSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(LS_SES);
-    if (raw) return JSON.parse(raw) as Session;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
 export function StoreProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
+  const [status, setStatus] = useState<Status>('loading');
   const [db, setDb] = useState<Db | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [userId, setUserId] = useState<number | null>(null);
 
-  // localStorage is browser-only, so hydrate after mount.
   useEffect(() => {
-    setDb(loadDb());
-    setSession(loadSession());
+    let cancelled = false;
+    fetchWorkspace()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setDb(res.db);
+          setUserId(res.userId);
+          setStatus('ready');
+        } else {
+          setStatus('anon');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('anon');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Slip photos can push the workspace past the ~5 MB localStorage ceiling. The
-  // write must not fail silently: the state would look saved and be gone on reload.
-  const persist = useCallback(
-    (next: Db) => {
+  const me = useMemo(
+    () => (db && userId ? db.users.find((u) => u.id === userId) ?? null : null),
+    [db, userId],
+  );
+
+  const run = useCallback<StoreValue['run']>(
+    async (fn) => {
       try {
-        localStorage.setItem(LS_DB, JSON.stringify(next));
-      } catch {
-        toast(
-          'Browser storage is full — this change is not saved. Remove some transfer slip photos and try again.',
-          'error',
-        );
+        const res = await fn();
+        if (!res.ok) {
+          toast(res.error, 'error');
+          return false;
+        }
+        setDb(res.db);
+        return true;
+      } catch (err) {
+        console.error(err);
+        toast('Could not reach the server — check your connection.', 'error');
+        return false;
       }
     },
     [toast],
   );
 
-  const persistSession = useCallback((next: Session | null) => {
-    if (next) localStorage.setItem(LS_SES, JSON.stringify(next));
-    else localStorage.removeItem(LS_SES);
+  const login = useCallback<StoreValue['login']>(async (username, password) => {
+    const res = await signIn(username, password);
+    if (!res.ok) return { ok: false, error: res.error };
+    setDb(res.db);
+    setUserId(res.userId);
+    setStatus('ready');
+    return { ok: true, db: res.db };
   }, []);
 
-  const me = useMemo(
-    () => (db && session ? db.users.find((u) => u.id === session.userId) ?? null : null),
-    [db, session],
-  );
+  const logout = useCallback(async () => {
+    await signOut();
+    setDb(null);
+    setUserId(null);
+    setStatus('anon');
+  }, []);
 
-  const update = useCallback(
-    (recipe: Recipe) => {
-      setDb((current) => {
-        if (!current) return current;
-        const draft: Db = structuredClone(current);
-        const audit: AuditFn = (group, action, detail) => {
-          draft.audit.push({
-            id: uid(draft.audit),
-            date: Date.now(),
-            userId: session ? session.userId : null,
-            group,
-            action,
-            detail,
-          });
-        };
-        recipe(draft, audit);
-        persist(draft);
-        return draft;
-      });
-    },
-    [persist, session],
-  );
-
-  const login = useCallback<StoreValue['login']>(
-    (username, password) => {
-      if (!db) return { ok: false, error: 'Workspace is still loading — try again.' };
-      const user = db.users.find(
-        (x) => x.username.toLowerCase() === username.toLowerCase() && x.password === password,
-      );
-      if (!user) return { ok: false, error: 'Invalid username or password.' };
-      if (!user.active)
-        return { ok: false, error: 'This account has been deactivated. Contact the owner.' };
-      const next = { userId: user.id };
-      setSession(next);
-      persistSession(next);
-      return { ok: true };
-    },
-    [db, persistSession],
-  );
-
-  const logout = useCallback(() => {
-    setSession(null);
-    persistSession(null);
-  }, [persistSession]);
-
-  // A deactivated or deleted account must not keep an open session.
-  useEffect(() => {
-    if (db && session && !me) {
-      setSession(null);
-      persistSession(null);
-    }
-    if (me && !me.active) {
-      setSession(null);
-      persistSession(null);
-    }
-  }, [db, session, me, persistSession]);
-
-  const value = useMemo<StoreValue | null>(() => {
-    if (!db) return null;
-    return {
+  const value = useMemo<StoreValue>(
+    () => ({
+      status,
       db,
       me,
-      session,
-      update,
+      run,
       login,
       logout,
-      money: (n) => fmtMoney(db.settings.currency, n),
-    };
-  }, [db, me, session, update, login, logout]);
-
-  if (!value) return <div className="boot">Loading workspace…</div>;
+      money: (n) => fmtMoney(db?.settings.currency ?? '$', n),
+    }),
+    [status, db, me, run, login, logout],
+  );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
-export function useStore(): StoreValue {
+/** Auth-aware access, for the shell and the sign-in screen. */
+export function useAuth(): StoreValue {
   const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error('useStore must be used inside <StoreProvider>');
+  if (!ctx) throw new Error('useAuth must be used inside <StoreProvider>');
   return ctx;
+}
+
+/**
+ * Workspace access for authenticated pages. These only ever mount behind the
+ * shell's guard, so the workspace and the signed-in user are present.
+ */
+export function useStore(): {
+  db: Db;
+  me: User;
+  run: StoreValue['run'];
+  money: StoreValue['money'];
+} {
+  const ctx = useAuth();
+  if (!ctx.db || !ctx.me) {
+    throw new Error('useStore used outside an authenticated route');
+  }
+  return { db: ctx.db, me: ctx.me, run: ctx.run, money: ctx.money };
 }

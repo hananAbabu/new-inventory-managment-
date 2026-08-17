@@ -23,7 +23,7 @@ export function ReceiptView({ sale }: { sale: Sale }) {
         <br />
         {st.phone}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+      <div className="r-head">
         <span>{sale.ref}</span>
         <span>{fd(sale.createdAt)}</span>
       </div>
@@ -45,8 +45,8 @@ export function ReceiptView({ sale }: { sale: Sale }) {
           ))}
         </tbody>
       </table>
-      <div className="r-dash" />
-      <table>
+      <div className="r-panel">
+        <table>
         <tbody>
           <tr>
             <td>Subtotal</td>
@@ -89,8 +89,8 @@ export function ReceiptView({ sale }: { sale: Sale }) {
             <td style={{ textAlign: 'right' }}>{money(sale.change)}</td>
           </tr>
         </tbody>
-      </table>
-      <div className="r-dash" />
+        </table>
+      </div>
       <div className="r-foot">{st.receiptFooter}</div>
     </div>
   );

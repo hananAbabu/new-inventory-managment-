@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { createProduct, updateProduct, type ProductInput } from '@/app/actions/catalog';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter } from '@/components/modal';
 import { useStore } from '@/components/store';
@@ -14,7 +15,6 @@ import {
 } from '@/lib/product-types';
 import type { Product, ProductType, Unit } from '@/lib/types';
 import { UNITS, formatQty, parseQty, qtyStep, unitShort } from '@/lib/units';
-import { uid } from '@/lib/utils';
 
 interface Props {
   open: boolean;
@@ -23,8 +23,9 @@ interface Props {
 }
 
 export function ProductForm({ open, product, onClose }: Props) {
-  const { db, me, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
 
   const [sku, setSku] = useState(product?.sku ?? '');
   const [name, setName] = useState(product?.name ?? '');
@@ -47,7 +48,7 @@ export function ProductForm({ open, product, onClose }: Props) {
   const unit: Unit = stockUnitFor(productType) ?? freeUnit;
   const def = typeDef(productType);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const skuV = sku.trim();
     const nameV = name.trim();
@@ -79,75 +80,35 @@ export function ProductForm({ open, product, onClose }: Props) {
       return;
     }
 
-    const packaging = {
+    const parsedQty = parseQty(qty, unit);
+    const startQty = product ? 0 : Math.max(0, isNaN(parsedQty) ? 0 : parsedQty);
+
+    const input: ProductInput = {
+      sku: skuV,
+      name: nameV,
+      categoryId: Number(categoryId),
+      supplierId: Number(supplierId) || null,
+      productType,
+      unit,
       kgPerPiece: needsKgPerPiece(productType) && kgV > 0 ? kgV : null,
       piecesPerCarton: needsPiecesPerCarton(productType) && pcsV > 0 ? pcsV : null,
+      costPrice: costV,
+      sellPrice: priceV,
+      minStock: minV,
+      qty: startQty,
     };
 
-    const now = Date.now();
-    const supId = Number(supplierId) || null;
+    setBusy(true);
+    const ok = await run(() =>
+      product ? updateProduct(product.id, input) : createProduct(input),
+    );
+    setBusy(false);
+    if (!ok) return;
 
-    if (product) {
-      update((draft, audit) => {
-        const p = draft.products.find((x) => x.id === product.id);
-        if (!p) return;
-        Object.assign(p, {
-          sku: skuV,
-          name: nameV,
-          categoryId: Number(categoryId),
-          supplierId: supId,
-          productType,
-          unit,
-          ...packaging,
-          costPrice: costV,
-          sellPrice: priceV,
-          minStock: minV,
-          updatedAt: now,
-        });
-        audit('PRODUCT', 'edit', `Updated ${skuV} — ${nameV}`);
-      });
-      toast('Product updated');
-    } else {
-      const parsedQty = parseQty(qty, unit);
-      const startQty = Math.max(0, isNaN(parsedQty) ? 0 : parsedQty);
-      update((draft, audit) => {
-        const np: Product = {
-          id: uid(draft.products),
-          sku: skuV,
-          name: nameV,
-          categoryId: Number(categoryId),
-          supplierId: supId,
-          productType,
-          unit,
-          ...packaging,
-          costPrice: costV,
-          sellPrice: priceV,
-          qty: startQty,
-          minStock: minV,
-          createdAt: now,
-          updatedAt: now,
-        };
-        draft.products.push(np);
-        if (startQty > 0)
-          draft.invTx.push({
-            id: uid(draft.invTx),
-            date: now,
-            productId: np.id,
-            sku: skuV,
-            name: nameV,
-            unit,
-            type: 'initial',
-            qty: startQty,
-            userId: me!.id,
-            note: 'Opening stock',
-          });
-        audit('PRODUCT', 'add', `Added ${skuV} — ${nameV} (${unitShort(unit)})`);
-      });
-      toast('Product added');
-      if (startQty <= minV)
-        toast(`${skuV} created at/below minimum stock (${formatQty(startQty, unit)})`, 'warning');
+    toast(product ? 'Product updated' : 'Product added');
+    if (!product && startQty <= minV) {
+      toast(`${skuV} created at/below minimum stock (${formatQty(startQty, unit)})`, 'warning');
     }
-
     onClose();
   }
 
@@ -358,7 +319,7 @@ export function ProductForm({ open, product, onClose }: Props) {
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> {product ? 'Save changes' : 'Create product'}
           </button>
         </ModalFooter>

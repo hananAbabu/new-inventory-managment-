@@ -177,20 +177,27 @@ input,select,textarea{font-family:inherit;font-size:13.5px;color:var(--ink)}
 .slip-actions .btn{margin-left:auto;padding:5px 10px;font-size:12px}
 .slip-view img{display:block;width:100%;border-radius:10px;border:1px solid var(--line)}
 
-/* ---------- receipt ---------- */
-.receipt{width:300px;margin:0 auto;background:#fff;border:1px dashed #c9d3cb;padding:18px 16px;font-size:12px;border-radius:6px}
+/* ---------- receipt ----------
+   Framed like the transfer-slip attachment: same rounded border, same inset
+   panel, so a receipt and a slip read as two of the same kind of document. */
+.receipt{width:320px;margin:0 auto;background:#fff;border:1px solid var(--line);padding:20px 18px;font-size:12px;border-radius:10px;box-shadow:var(--shadow)}
 .receipt .r-logo{font-family:var(--display);font-weight:800;font-size:15px;text-align:center}
 .receipt .r-sub{text-align:center;color:var(--muted);margin:4px 0 10px;line-height:1.45}
-.receipt .r-dash{border-top:1.5px dashed #c9d3cb;margin:9px 0}
+.receipt .r-dash{border-top:1px solid var(--line);margin:11px 0}
 .receipt table{width:100%;border-collapse:collapse}
 .receipt td{padding:2px 0;vertical-align:top}
 .receipt .r-tot{font-weight:800;font-size:13.5px}
 .receipt .r-foot{text-align:center;color:var(--muted);margin-top:10px}
+/* The totals block sits in its own inset panel, like the slip frame. */
+.receipt .r-panel{background:#f7faf8;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:11px}
+.receipt .r-panel table{width:100%}
+.receipt .r-head{display:flex;justify-content:space-between;font-size:11px}
 #print-area{display:none}
 @media print{
   body>*{display:none!important}
   #print-area{display:block!important}
-  #print-area .receipt{border:0;width:100%}
+  #print-area .receipt{border:0;box-shadow:none;width:100%;border-radius:0}
+  #print-area .receipt .r-panel{background:transparent;border:0;padding:0}
 }
 
 /* ---------- notif ---------- */

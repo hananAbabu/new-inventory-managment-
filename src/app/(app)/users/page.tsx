@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { deleteUser, saveUser, toggleUserActive } from '@/app/actions/admin';
 import { Icon } from '@/components/icon';
 import { Modal, ModalBody, ModalFooter, useConfirm } from '@/components/modal';
 import { useStore } from '@/components/store';
@@ -8,7 +9,7 @@ import { useToast } from '@/components/toast';
 import { Badge } from '@/components/ui';
 import type { BadgeTone } from '@/lib/selectors';
 import type { Role, User } from '@/lib/types';
-import { fdS, initials, uid } from '@/lib/utils';
+import { fdS, initials } from '@/lib/utils';
 
 const ROLE_TONE: Record<Role, BadgeTone> = {
   admin: 'b-violet',
@@ -19,52 +20,26 @@ const ROLE_TONE: Record<Role, BadgeTone> = {
 const ROLES: Role[] = ['admin', 'storekeeper', 'cashier'];
 
 export default function UsersPage() {
-  const { db, me, update } = useStore();
+  const { db, me, run } = useStore();
   const toast = useToast();
   const confirm = useConfirm();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
 
-  const activeAdmins = () => db.users.filter((x) => x.role === 'admin' && x.active).length;
-
   function openForm(u: User | null) {
     setEditing(u);
     setFormOpen(true);
   }
 
-  function toggleActive(u: User) {
-    if (u.id === me!.id) {
-      toast('You cannot deactivate your own account', 'error');
-      return;
-    }
-    if (u.role === 'admin' && u.active && activeAdmins() <= 1) {
-      toast('Cannot deactivate the last active admin', 'error');
-      return;
-    }
+  async function toggleActive(u: User) {
     const nextActive = !u.active;
-    update((draft, audit) => {
-      const target = draft.users.find((x) => x.id === u.id);
-      if (!target) return;
-      target.active = nextActive;
-      audit(
-        'USER',
-        nextActive ? 'activate' : 'deactivate',
-        `User ${u.username} ${nextActive ? 'activated' : 'deactivated'}`,
-      );
-    });
-    toast(nextActive ? 'User activated' : 'User deactivated');
+    if (await run(() => toggleUserActive(u.id))) {
+      toast(nextActive ? 'User activated' : 'User deactivated');
+    }
   }
 
   async function del(u: User) {
-    if (u.id === me!.id) {
-      toast('You cannot delete your own account', 'error');
-      return;
-    }
-    if (u.role === 'admin' && activeAdmins() <= 1) {
-      toast('Cannot delete the last active admin', 'error');
-      return;
-    }
     const ok = await confirm({
       title: 'Delete user',
       message: (
@@ -76,11 +51,7 @@ export default function UsersPage() {
       confirm: 'Delete',
     });
     if (!ok) return;
-    update((draft, audit) => {
-      draft.users = draft.users.filter((x) => x.id !== u.id);
-      audit('USER', 'delete', 'Deleted user ' + u.username);
-    });
-    toast('User deleted');
+    if (await run(() => deleteUser(u.id))) toast('User deleted');
   }
 
   return (
@@ -160,15 +131,16 @@ export default function UsersPage() {
 }
 
 function UserForm({ user, onClose }: { user: User | null; onClose: () => void }) {
-  const { db, update } = useStore();
+  const { db, run } = useStore();
   const toast = useToast();
 
   const [name, setName] = useState(user?.name ?? '');
   const [username, setUsername] = useState(user?.username ?? '');
   const [role, setRole] = useState<Role>(user?.role ?? 'admin');
   const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const nameV = name.trim();
     const userV = username.trim().toLowerCase();
@@ -181,42 +153,12 @@ function UserForm({ user, onClose }: { user: User | null; onClose: () => void })
       return;
     }
 
-    if (user) {
-      if (
-        user.role === 'admin' &&
-        role !== 'admin' &&
-        db.users.filter((x) => x.role === 'admin' && x.active).length <= 1
-      ) {
-        toast('Cannot demote the last active admin', 'error');
-        return;
-      }
-      update((draft, audit) => {
-        const u = draft.users.find((x) => x.id === user.id);
-        if (!u) return;
-        u.name = nameV;
-        u.username = userV;
-        u.role = role;
-        if (password) u.password = password;
-        audit('USER', 'edit', `Updated user ${userV} (role: ${role})`);
-      });
-    } else {
-      if (!password || password.length < 4) {
-        toast('Password must be at least 4 characters', 'error');
-        return;
-      }
-      update((draft, audit) => {
-        draft.users.push({
-          id: uid(draft.users),
-          name: nameV,
-          username: userV,
-          password,
-          role,
-          active: true,
-          createdAt: Date.now(),
-        });
-        audit('USER', 'add', `Created user ${userV} (role: ${role})`);
-      });
-    }
+    setBusy(true);
+    const ok = await run(() =>
+      saveUser(user?.id ?? null, { name: nameV, username: userV, role, password }),
+    );
+    setBusy(false);
+    if (!ok) return;
 
     toast('User saved');
     onClose();
@@ -283,7 +225,7 @@ function UserForm({ user, onClose }: { user: User | null; onClose: () => void })
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="submit">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" /> Save user
           </button>
         </ModalFooter>
