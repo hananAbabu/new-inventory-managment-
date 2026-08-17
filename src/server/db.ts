@@ -2,8 +2,19 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema';
 
-const connectionString =
-  process.env.DATABASE_URL ?? 'postgres://inventory:inventory@127.0.0.1:15433/inventory';
+/**
+ * The local container's throwaway credentials stand in during development only.
+ * In production a missing DATABASE_URL is a deployment fault: fail loudly rather
+ * than quietly dialling a database that is not there.
+ */
+function connectionString(): string {
+  const url = process.env.DATABASE_URL;
+  if (url) return url;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DATABASE_URL is not set.');
+  }
+  return 'postgres://inventory:inventory@127.0.0.1:15433/inventory';
+}
 
 /**
  * Next reloads modules on every edit in development, which would open a new pool
@@ -21,7 +32,11 @@ const globalForDb = globalThis as unknown as {
 function connect(): NodePgDatabase<typeof schema> {
   if (globalForDb.__inventoryDb) return globalForDb.__inventoryDb;
 
-  const pool = new Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000 });
+  const pool = new Pool({
+    connectionString: connectionString(),
+    max: 10,
+    idleTimeoutMillis: 30_000,
+  });
   const instance = drizzle(pool, { schema });
   globalForDb.__inventoryPool = pool;
   globalForDb.__inventoryDb = instance;
