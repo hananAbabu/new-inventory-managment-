@@ -26,16 +26,35 @@ const globalForDb = globalThis as unknown as {
 };
 
 /**
+ * Hosted Postgres (Neon, Supabase, RDS) requires TLS; a local container does not
+ * and has no certificate to present. Decided from the host rather than from an
+ * environment flag, so moving between them needs no extra configuration.
+ */
+function isLocal(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Built on first query, never at import time: the build worker loads these
  * modules while prerendering pages and must not open a client to do it.
  */
 function connect(): NodePgDatabase<typeof schema> {
   if (globalForDb.__inventoryDb) return globalForDb.__inventoryDb;
 
+  const url = connectionString();
   const pool = new Pool({
-    connectionString: connectionString(),
-    max: 10,
-    idleTimeoutMillis: 30_000,
+    connectionString: url,
+    ssl: isLocal(url) ? undefined : { rejectUnauthorized: true },
+    // Neon closes idle connections at its own pace and bills by compute time, so a
+    // serverless-friendly pool stays small and lets connections go sooner.
+    max: isLocal(url) ? 10 : 5,
+    idleTimeoutMillis: isLocal(url) ? 30_000 : 10_000,
+    connectionTimeoutMillis: 15_000,
   });
   const instance = drizzle(pool, { schema });
   globalForDb.__inventoryPool = pool;
