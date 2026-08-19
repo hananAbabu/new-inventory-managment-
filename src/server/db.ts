@@ -66,9 +66,10 @@ function connect(): NodePgDatabase<typeof schema> {
   const pool = new Pool({
     connectionString: stripLibpqParams(url),
     ssl: isLocal(url) ? undefined : { rejectUnauthorized: true },
-    // Neon closes idle connections at its own pace and bills by compute time, so a
-    // serverless-friendly pool stays small and lets connections go sooner.
-    max: isLocal(url) ? 10 : 5,
+    // Every serverless instance holds its own pool, so a large one here multiplies
+    // by the number of live instances. Neon's pooled endpoint does the real pooling;
+    // one connection per instance is enough and keeps well clear of the branch limit.
+    max: process.env.VERCEL ? 1 : isLocal(url) ? 10 : 5,
     idleTimeoutMillis: isLocal(url) ? 30_000 : 10_000,
     connectionTimeoutMillis: 15_000,
   });

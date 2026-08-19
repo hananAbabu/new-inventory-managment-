@@ -1,4 +1,9 @@
 /** @type {import('next').NextConfig} */
+
+// This laptop has little free memory and dies mid-build with parallel workers.
+// Vercel's builders do not, and serialising there would only make builds slower.
+const lowMemoryLocalBuild = !process.env.VERCEL;
+
 const nextConfig = {
   reactStrictMode: true,
   images: {
@@ -6,11 +11,7 @@ const nextConfig = {
     unoptimized: true,
     remotePatterns: [{ protocol: 'https', hostname: 'image.qwenlm.ai' }],
   },
-  experimental: {
-    // This machine has little free memory; one build worker keeps it in bounds.
-    cpus: 1,
-    workerThreads: false,
-  },
+  ...(lowMemoryLocalBuild ? { experimental: { cpus: 1, workerThreads: false } } : {}),
 };
 
 export default nextConfig;
