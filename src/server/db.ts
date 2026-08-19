@@ -40,6 +40,22 @@ function isLocal(url: string): boolean {
 }
 
 /**
+ * Neon hands out URLs carrying libpq-style options. node-postgres parses those
+ * itself and warns about them, and its interpretation can disagree with the TLS
+ * settings chosen below, so they are removed and TLS is driven from code alone.
+ */
+function stripLibpqParams(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('channel_binding');
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
  * Built on first query, never at import time: the build worker loads these
  * modules while prerendering pages and must not open a client to do it.
  */
@@ -48,7 +64,7 @@ function connect(): NodePgDatabase<typeof schema> {
 
   const url = connectionString();
   const pool = new Pool({
-    connectionString: url,
+    connectionString: stripLibpqParams(url),
     ssl: isLocal(url) ? undefined : { rejectUnauthorized: true },
     // Neon closes idle connections at its own pace and bills by compute time, so a
     // serverless-friendly pool stays small and lets connections go sooner.

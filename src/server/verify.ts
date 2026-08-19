@@ -113,7 +113,11 @@ async function main() {
       const after = num(
         (await tx.select().from(schema.products).where(eq(schema.products.id, sugar.id)))[0].qtyStore,
       );
-      check('sale writes and decrements stock', after === before - 10, `${before} → ${after} kg`);
+          check(
+        'sale writes and decrements stock',
+        before > 10 && after === before - 10 && after >= 0,
+        `${before} → ${after} kg`,
+      );
       check('reference generated', /^S-\d{5}$/.test(ref), ref);
       throw new Rollback();
     });

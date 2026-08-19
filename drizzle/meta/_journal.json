@@ -15,6 +15,13 @@
       "when": 1786992270402,
       "tag": "0001_credit_locations_customers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787123876830,
+      "tag": "0002_stock_non_negative",
+      "breakpoints": true
     }
   ]
 }

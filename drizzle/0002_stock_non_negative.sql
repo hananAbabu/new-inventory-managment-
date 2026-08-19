@@ -1,0 +1,2 @@
+ALTER TABLE "products" ADD CONSTRAINT "products_qty_store_non_negative" CHECK (qty_store >= 0);--> statement-breakpoint
+ALTER TABLE "products" ADD CONSTRAINT "products_qty_shop_non_negative" CHECK (qty_shop >= 0);

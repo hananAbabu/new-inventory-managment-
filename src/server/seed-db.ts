@@ -92,7 +92,9 @@ async function run() {
         piecesPerCarton: p.piecesPerCarton,
         costPrice: money(p.costPrice),
         sellPrice: money(p.sellPrice),
-        qty: quantity(p.qty),
+        // qty is generated from these two, so the locations are what get written.
+        qtyStore: quantity(p.qtyStore),
+        qtyShop: quantity(p.qtyShop),
         minStock: quantity(p.minStock),
         createdAt: new Date(p.createdAt),
         updatedAt: new Date(p.updatedAt),

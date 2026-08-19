@@ -173,7 +173,11 @@ export const products = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('products_sku_key').on(t.sku)],
+  (t) => [
+    uniqueIndex('products_sku_key').on(t.sku),
+    check('products_qty_store_non_negative', sql`qty_store >= 0`),
+    check('products_qty_shop_non_negative', sql`qty_shop >= 0`),
+  ],
 );
 
 export const sales = pgTable(
